@@ -12,7 +12,7 @@
     color-scheme:dark;
     --bg:#07090d;--panel:#10141b;--panel2:#171c25;--line:#27303d;
     --text:#eef3f8;--muted:#8894a4;--blue:#43a8ff;--cyan:#40ecff;
-    --yellow:#fff3ad;--red:#ff5b5f;--green:#42d392;--orange:#ffb85c;
+    --purple:#c56cff;--red:#ff5b5f;--green:#42d392;--orange:#ffb85c;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);
@@ -56,9 +56,9 @@
   .legend{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid var(--line);
     color:var(--muted);font-size:10px;line-height:1.4}
   .legend span{display:flex;align-items:center;gap:5px}
-  .swatch{display:inline-block;width:16px;height:3px;border-radius:3px;background:var(--blue)}
-  .swatch.wave{background:var(--yellow)}
-  .swatch.energy{height:7px;background:linear-gradient(90deg,#10164f,#176cff,#26e8ff,#ecffff)}
+  .swatch{display:inline-block;width:16px;height:3px;border-radius:3px;background:#31e482}
+  .swatch.wave{background:var(--purple)}
+  .swatch.energy{height:7px;background:linear-gradient(90deg,#03150d,#087a45,#28df83,#eafff1)}
   .legend .grow{flex:1}
 
   .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:8px 0}
@@ -135,7 +135,7 @@
     <div>
       <div class="eyebrow">VOICEPRINT</div>
       <h1>声纹训练</h1>
-      <p>时域音量包络 + 窄带实时声谱图 · 建议佩戴耳机并在安静环境使用</p>
+      <p>紫色响度包络 + 绿色窄带实时频谱图 · 建议佩戴耳机并在安静环境使用</p>
     </div>
     <div id="statusPill" class="statusPill" aria-live="polite"><i></i><span>待机</span></div>
   </header>
@@ -143,16 +143,16 @@
   <main>
     <section class="visualCard" aria-label="实时声音图谱">
       <div class="visualHead">
-        <strong>窄带声谱 · 实时图谱</strong>
+        <strong>响度 + 窄带频谱图</strong>
         <div class="headRight"><span id="voiceState">等待声音</span><span id="timeReadout">00:00.0</span></div>
       </div>
       <div class="canvasShell" id="canvasShell">
-        <canvas id="scope"></canvas>
+        <canvas id="scope" role="img" aria-label="上方为紫色响度包络，下方为绿色窄带频谱图"></canvas>
         <div class="emptyState" id="emptyState"><b>点击“开始记录”</b><span>允许麦克风后，扫描线会从左向右展开</span></div>
       </div>
       <div class="legend">
-        <span><i class="swatch wave"></i>音量包络</span>
-        <span><i class="swatch energy"></i>暗 → 亮：能量增强</span>
+        <span><i class="swatch wave"></i>上方：响度</span>
+        <span><i class="swatch energy"></i>下方：绿色频谱图，暗 → 亮表示能量增强</span>
         <span><i class="swatch"></i>横向亮线：基频与谐波</span>
         <span class="grow"></span>
         <span>滚动保留最近 30 秒 · 停止后左右拖动回看</span>
@@ -182,8 +182,8 @@
             <label for="windowSelect">屏幕时间窗</label>
             <select id="windowSelect">
               <option value="6">6 秒</option>
-              <option value="10" selected>10 秒</option>
-              <option value="15">15 秒</option>
+              <option value="8" selected>8 秒</option>
+              <option value="12">12 秒</option>
             </select>
           </div>
           <div class="setting">
@@ -198,10 +198,14 @@
         </div>
         <div class="setting" style="margin-top:12px">
           <label for="floorRange">显示灵敏度（越低越容易看见微弱气声）</label>
-          <div class="rangeRow"><input id="floorRange" type="range" min="-100" max="-58" value="-84" step="1"><output id="floorOut">−84 dB</output></div>
+          <div class="rangeRow"><input id="floorRange" type="range" min="-100" max="-58" value="-90" step="1"><output id="floorOut">−90 dB</output></div>
+        </div>
+        <div class="setting" style="margin-top:12px">
+          <label for="waveGainRange">响度显示增益（只改变上方紫色包络）</label>
+          <div class="rangeRow"><input id="waveGainRange" type="range" min="-6" max="18" value="6" step="1"><output id="waveGainOut">+6 dB</output></div>
         </div>
         <label class="checkRow"><input id="boostCheck" type="checkbox" checked><span>开启高频补偿，使 2–5 kHz 的泛音与共振带更易观察（只改变显示，不改变录音）</span></label>
-        <p class="finePrint">显示参数改变时会用当前缓存重新绘图，不影响原录音。图中的线和雾都直接来自窄带 FFT 能量，并非按检测到的音高合成；不同手机、距离和环境之间不宜直接比较绝对数值。</p>
+        <p class="finePrint">显示参数会自动记住，下次打开继续使用。参数改变时只重绘当前缓存，不影响原录音。响度增益采用软压缩显示，不等同于校准声压级；图中的线和雾都直接来自窄带 FFT 能量，并非按检测到的音高合成。</p>
       </div>
     </details>
 
@@ -209,9 +213,9 @@
       <summary>怎样读这张图</summary>
       <div class="detailBody">
         <ol class="guideList">
-          <li><span class="guideNum">1</span><span><b>顶部宽度 = 声音电平。</b>对称波形越高，表示这一时刻输入越强；渐宽/渐窄可观察渐强、渐弱及平滑起落。</span></li>
+          <li><span class="guideNum">1</span><span><b>上方紫色包络 = 响度。</b>对称波形越高，表示这一时刻输入越强；小声也经过显示增强，便于观察渐强、渐弱及平滑起落。</span></li>
           <li><span class="guideNum">2</span><span><b>最低而连续的亮线通常是基频 F0。</b>它决定听到的音高；上方近似等间距的平行线是整数倍谐波。</span></li>
-          <li><span class="guideNum">3</span><span><b>线间的蓝色“雾”是非谐波能量。</b>气声、摩擦或不规则振动会增加这种散布；清晰稳定的发声会留下更规整的横线。</span></li>
+          <li><span class="guideNum">3</span><span><b>线间的绿色“雾”是非谐波能量。</b>气声、摩擦或不规则振动会增加这种散布；清晰稳定的发声会留下更规整的横线。</span></li>
           <li><span class="guideNum">4</span><span><b>起音处的竖直边缘反映进入方式。</b>谐波同时突然出现常见于较硬起音；先出现噪声、谐波再渐入则更像送气起音。</span></li>
           <li><span class="guideNum">5</span><span><b>较亮的谐波群就是共振能量带。</b>舌位、唇形与喉位改变时，这些亮带会整体上移、下移或改变强弱；它们并不是另一个音高。</span></li>
           <li><span class="guideNum">6</span><span><b>重点观察 2–4 kHz 与 0–1 kHz 的能量比。</b>比值升高常对应更集中的高频能量与更明亮/更“窄”的声学结果；请用同一手机距离做前后对比。</span></li>
@@ -238,32 +242,36 @@ const ui={
   level:$("levelValue"),pitch:$("pitchValue"),note:$("noteValue"),clarity:$("clarityValue"),
   clarityNote:$("clarityNote"),band:$("bandValue"),bandNote:$("bandNote"),
   window:$("windowSelect"),freq:$("freqSelect"),floor:$("floorRange"),floorOut:$("floorOut"),
+  waveGain:$("waveGainRange"),waveGainOut:$("waveGainOut"),
   boost:$("boostCheck"),notice:$("secureNotice")
 };
 
 let cssW=0,cssH=0,DPR=1,layout=null;
-let windowSec=10,maxFreq=5000,floorDb=-84,highBoost=true;
-let audioCtx=null,analyser=null,micStream=null,sourceNode=null,timeData=null,freqData=null;
+let windowSec=8,maxFreq=5000,floorDb=-90,loudnessGainDb=6,highBoost=true;
+let audioCtx=null,analyser=null,analysisSink=null,micStream=null,micTrack=null,sourceNode=null,timeData=null,freqData=null;
 let recording=false,recordStartWall=0,lastElapsed=0,lastAnalysisAt=0,lastPitchAt=0;
 let pcmProcessor=null,pcmRing=null,pcmWrite=0,pcmCount=0,wakeLock=null;
 let playbackBuffer=null,playbackSource=null,playbackPlaying=false,playbackOffset=0;
 let playbackStartCtxTime=0,playbackTimelineStart=0,playbackToken=0;
 let frames=[],binHz=0,storeBins=0,lastPaintX=-1,scrollRemainder=0,rafId=0;
 let playheadTime=0,playbackRaf=0,lastPlaybackRender=0,scrubRenderRaf=0,pendingScrubTime=null;
+let reviewMode=false;
 let latestPitch=null,latestCpp=null,pitchMidiSmooth=null,lastMetricUpdate=0,toastTimer=0;
+let inputSilenceSince=0,inputWarningShown=false;
 let cppRe=null,cppIm=null,cppWindow=null,cppN=0;
-const REWIND_SECONDS=30,PLAYHEAD_RATIO=.76,ANALYSIS_INTERVAL=1/27,PITCH_INTERVAL=.085;
+const REWIND_SECONDS=30,PLAYHEAD_RATIO=.76,PLAYBACK_LINE_RATIO=.25,ANALYSIS_INTERVAL=1/27,PITCH_INTERVAL=.085;
+const SETTINGS_KEY="voiceprint.display-settings.v1";
 const NOTE_NAMES=["C","C♯","D","E♭","E","F","F♯","G","A♭","A","B♭","B"];
 
 /* ---------- canvas sizing ---------- */
 function computeLayout(){
-  const left=43,right=9,top=18,bottom=25;
+  const left=47,right=9,top=22,bottom=25,gap=13;
   const plotW=Math.max(120,Math.floor(cssW-left-right));
   const waveH=Math.max(72,Math.min(104,Math.round(cssH*.17)));
   const waveTop=top;
-  const specTop=waveTop+waveH+31;
+  const specTop=waveTop+waveH+gap;
   const specH=Math.max(190,Math.floor(cssH-specTop-bottom));
-  return {left,right,top,bottom,plotW,waveTop,waveH,specTop,specH};
+  return {left,right,top,bottom,gap,plotW,waveTop,waveH,specTop,specH};
 }
 function resizeCanvas(){
   const r=shell.getBoundingClientRect();
@@ -284,8 +292,8 @@ function resizeCanvas(){
 /* ---------- colour / spectral painting ---------- */
 const COLOR_LEVELS=240;
 const COLOR_STOPS=[
-  [0,[0,0,0]],[.10,[4,6,37]],[.28,[12,27,119]],[.52,[22,88,245]],
-  [.73,[20,191,255]],[.88,[73,244,255]],[1,[235,255,250]]
+  [0,[0,0,0]],[.10,[1,17,10]],[.28,[4,63,35]],[.52,[7,143,76]],
+  [.73,[20,214,117]],[.88,[99,250,161]],[1,[235,255,241]]
 ];
 const COLOR_LUT=(()=>{
   const out=new Uint8ClampedArray(COLOR_LEVELS*4);
@@ -312,24 +320,28 @@ function frameDbAt(frame,freq){
 function buildSpecColumn(frame){
   const h=layout.specH;
   if(!specColumn||specColumn.height!==h)specColumn=specCtx.createImageData(1,h);
-  const d=specColumn.data,topDb=-18;
+  const d=specColumn.data,topDb=-22;
   for(let y=0;y<h;y++){
     const f=maxFreq*(1-y/Math.max(1,h-1));
-    let db=frameDbAt(frame,f);
+    let db=frameDbAt(frame,f)+3;
     if(highBoost&&f>250)db+=Math.min(16,3.5*Math.log2(f/250));
     let n=Math.max(0,Math.min(1,(db-floorDb)/(topDb-floorDb)));
-    n=Math.pow(n,1.28);
+    n=Math.pow(n,.82);
     const ci=Math.max(0,Math.min(COLOR_LEVELS-1,Math.round(n*(COLOR_LEVELS-1))))*4,di=y*4;
     d[di]=COLOR_LUT[ci];d[di+1]=COLOR_LUT[ci+1];d[di+2]=COLOR_LUT[ci+2];d[di+3]=255;
   }
   return specColumn;
 }
 function waveBounds(frame){
-  const h=layout.waveH,mid=h/2,gain=1.75;
-  const shape=v=>Math.sign(v)*Math.pow(Math.min(1,Math.abs(v)*gain),.70);
-  let hi=shape(frame.max),lo=shape(frame.min);
-  if(frame.levelDb<-72){hi=0;lo=0;}
-  return [Math.max(0,mid-hi*(h*.45)),Math.min(h,mid-lo*(h*.45))];
+  const h=layout.waveH,mid=h/2,peak=Math.max(Math.abs(frame.max),Math.abs(frame.min));
+  if(peak<1e-7||frame.levelDb<-96)return [mid,mid];
+  /* dB 域软压缩：保留小声可见度，并把接近满量程的区域渐进压缩，避免过早顶满。 */
+  const displayDb=20*Math.log10(peak)+loudnessGainDb;
+  /* −78 dBFS 起显、+12 dB 显示顶点；默认 +6 dB 时满量程输入仍留有余量。 */
+  let n=Math.max(0,Math.min(1,(displayDb+78)/90));
+  n=Math.pow(n,.78);
+  const half=n*h*.45;
+  return [mid-half,mid+half];
 }
 function paintColumns(frame,x1,x2){
   x1=Math.max(0,Math.floor(x1));x2=Math.min(layout.plotW-1,Math.floor(x2));
@@ -337,7 +349,7 @@ function paintColumns(frame,x1,x2){
   const col=buildSpecColumn(frame);
   for(let x=x1;x<=x2;x++)specCtx.putImageData(col,x,0);
   const b=waveBounds(frame),w=x2-x1+1;
-  waveCtx.fillStyle="rgba(255,247,177,.94)";
+  waveCtx.fillStyle="rgba(197,108,255,.96)";
   waveCtx.fillRect(x1,b[0],w,Math.max(1,b[1]-b[0]));
 }
 function clearLayers(){
@@ -353,7 +365,12 @@ function shiftLayers(px){
   specCtx.fillStyle="#010205";specCtx.fillRect(layout.plotW-px,0,px,layout.specH);
 }
 function earliestFrameTime(){return frames.length?frames[0].t:0;}
-function viewStartFor(atTime){return Math.max(earliestFrameTime(),atTime-windowSec*PLAYHEAD_RATIO);}
+function activeLineRatio(){return reviewMode&&!recording?PLAYBACK_LINE_RATIO:PLAYHEAD_RATIO;}
+function viewStartFor(atTime){
+  const start=atTime-windowSec*activeLineRatio();
+  /* 回看时允许左侧留白，让最早一帧也能固定在 1/4 播放线上。 */
+  return reviewMode&&!recording?start:Math.max(earliestFrameTime(),start);
+}
 function lowerBoundFrame(time){
   let lo=0,hi=frames.length;
   while(lo<hi){const mid=(lo+hi)>>1;if(frames[mid].t<time)lo=mid+1;else hi=mid;}
@@ -407,13 +424,13 @@ function drawComposite(elapsed=0){
   if(!layout)return;
   ctx.setTransform(DPR,0,0,DPR,0,0);ctx.fillStyle="#030507";ctx.fillRect(0,0,cssW,cssH);
   const L=layout;
-  ctx.fillStyle="#20242b";ctx.fillRect(L.left,L.waveTop,L.plotW,L.waveH);
+  ctx.fillStyle="#010205";ctx.fillRect(L.left,L.waveTop,L.plotW,L.waveH);
   ctx.drawImage(waveLayer,L.left,L.waveTop,L.plotW,L.waveH);
   ctx.fillStyle="#010205";ctx.fillRect(L.left,L.specTop,L.plotW,L.specH);
   ctx.drawImage(specLayer,L.left,L.specTop,L.plotW,L.specH);
 
   const start=viewStartFor(elapsed),tick=windowSec<=6?1:(windowSec<=10?2:3);
-  const first=Math.ceil(start/tick)*tick;
+  const first=Math.max(0,Math.ceil(start/tick)*tick);
   ctx.font="9px -apple-system,BlinkMacSystemFont,sans-serif";ctx.textBaseline="alphabetic";
   for(let t=first;t<=start+windowSec+.001;t+=tick){
     const x=L.left+(t-start)/windowSec*L.plotW;
@@ -423,7 +440,7 @@ function drawComposite(elapsed=0){
     ctx.fillStyle="#6f7b89";ctx.textAlign=t===first&&x<L.left+10?"left":"center";
     ctx.fillText((t<60?t.toFixed(0):formatClock(t))+"s",x,L.specTop+L.specH+16);
   }
-  line(ctx,L.left,L.waveTop+L.waveH/2,L.left+L.plotW,L.waveTop+L.waveH/2,"rgba(255,246,173,.44)");
+  line(ctx,L.left,L.waveTop+L.waveH/2,L.left+L.plotW,L.waveTop+L.waveH/2,"rgba(197,108,255,.38)");
 
   const khzMax=maxFreq/1000;
   for(let k=0;k<=Math.floor(khzMax);k++){
@@ -435,16 +452,21 @@ function drawComposite(elapsed=0){
   if(khzMax%1!==0){
     const y=L.specTop;ctx.fillStyle="#8894a3";ctx.textAlign="right";ctx.fillText(khzMax.toFixed(1),L.left-7,y+3);
   }
-  ctx.fillStyle="#8793a0";ctx.textAlign="left";ctx.font="9px -apple-system,BlinkMacSystemFont,sans-serif";
-  ctx.fillText("SIGNAL",5,L.waveTop+L.waveH/2+3);ctx.fillText("kHz",8,L.specTop-8);
+  ctx.fillStyle="#9aa5b2";ctx.textAlign="left";ctx.font="10px -apple-system,BlinkMacSystemFont,sans-serif";
+  ctx.fillText("响度 · 显示增益 "+signedDb(loudnessGainDb),5,L.waveTop-6);ctx.fillText("频谱图 · kHz",5,L.specTop-3);
 
   ctx.strokeStyle="#697583";ctx.lineWidth=1;
   ctx.strokeRect(L.left+.5,L.waveTop+.5,L.plotW-1,L.waveH-1);
   ctx.strokeRect(L.left+.5,L.specTop+.5,L.plotW-1,L.specH-1);
   if(frames.length){
     const cursor=L.left+Math.max(0,Math.min(1,(elapsed-start)/windowSec))*L.plotW;
-    line(ctx,cursor,L.waveTop-4,cursor,L.specTop+L.specH,"rgba(234,246,255,.80)",1.2);
-    line(ctx,cursor+1,L.waveTop-4,cursor+1,L.specTop+L.specH,"rgba(52,178,255,.26)",1);
+    const playbackLine=reviewMode&&!recording;
+    line(ctx,cursor,L.waveTop-4,cursor,L.specTop+L.specH,playbackLine?"rgba(255,184,92,.96)":"rgba(234,246,255,.80)",playbackLine?1.6:1.2);
+    line(ctx,cursor+1,L.waveTop-4,cursor+1,L.specTop+L.specH,playbackLine?"rgba(255,184,92,.30)":"rgba(52,178,255,.26)",1);
+    if(playbackLine){
+      ctx.fillStyle="#ffbf70";ctx.textAlign="left";ctx.font="9px -apple-system,BlinkMacSystemFont,sans-serif";
+      ctx.fillText("播放线",Math.min(cursor+5,L.left+L.plotW-34),L.waveTop+12);
+    }
   }
 }
 
@@ -611,6 +633,7 @@ function analysisLoop(nowMs){
     const spec=spectralMetrics(freqData,latestCpp);
     captureFrame(elapsed,stats,latestPitch,spec);
     if(now-lastMetricUpdate>.105){lastMetricUpdate=now;updateMetrics(stats,latestPitch,spec);}
+    updateInputHealth(stats,now);
     if(frames.length===1)ui.empty.style.display="none";
   }
   drawComposite(playheadTime);
@@ -619,8 +642,69 @@ function analysisLoop(nowMs){
 
 /* ---------- recording / playback ---------- */
 async function ensureAudio(){
-  if(!audioCtx){const AC=window.AudioContext||window.webkitAudioContext;if(!AC)throw new Error("此浏览器不支持 Web Audio");audioCtx=new AC();}
+  const AC=window.AudioContext||window.webkitAudioContext;
+  if(!AC)throw new Error("此浏览器不支持 Web Audio");
+  if(!audioCtx||audioCtx.state==="closed"){
+    try{audioCtx=new AC({latencyHint:"interactive"});}catch(_){audioCtx=new AC();}
+  }
   if(audioCtx.state!=="running")await audioCtx.resume();
+  if(audioCtx.state!=="running"){
+    const err=new Error("浏览器仍暂停着音频引擎");err.name="AudioContextSuspended";throw err;
+  }
+}
+async function requestMicStream(){
+  const preferred={audio:{
+    echoCancellation:{ideal:false},noiseSuppression:{ideal:false},
+    autoGainControl:{ideal:false},channelCount:{ideal:1}
+  }};
+  try{return await navigator.mediaDevices.getUserMedia(preferred);}
+  catch(err){
+    if(err&&(err.name==="OverconstrainedError"||err.name==="TypeError")){
+      return navigator.mediaDevices.getUserMedia({audio:true});
+    }
+    throw err;
+  }
+}
+function micName(){
+  if(!micTrack)return "麦克风";
+  const label=(micTrack.label||"").trim();
+  return label||"默认麦克风";
+}
+function connectMicDiagnostics(){
+  if(!micTrack)return;
+  micTrack.enabled=true;
+  micTrack.addEventListener("mute",()=>{
+    if(!recording)return;
+    setStatus("麦克风静音","error");ui.voiceState.textContent=micName()+" 暂时没有提供音频";
+  });
+  micTrack.addEventListener("unmute",()=>{
+    if(!recording)return;
+    inputSilenceSince=0;inputWarningShown=false;setStatus("记录中","live");
+    ui.voiceState.textContent="已连接 "+micName()+" · 等待声音";
+  });
+  micTrack.addEventListener("ended",()=>{
+    if(!recording)return;
+    stopRecording("麦克风已断开");setStatus("麦克风已断开","error");
+    showToast("麦克风连接已结束，请检查浏览器所选的输入设备后重新记录。",3800);
+  });
+}
+function updateInputHealth(stats,now){
+  const digitalSilence=stats.min===0&&stats.max===0;
+  if(!digitalSilence){
+    inputSilenceSince=0;
+    if(inputWarningShown){inputWarningShown=false;setStatus("记录中","live");}
+    return;
+  }
+  if(!inputSilenceSince)inputSilenceSince=now;
+  if(now-inputSilenceSince<1.8)return;
+  const contextStopped=audioCtx&&audioCtx.state!=="running";
+  const trackMuted=micTrack&&micTrack.muted;
+  setStatus(contextStopped?"音频已暂停":"麦克风无信号","error");
+  ui.voiceState.textContent=contextStopped?"音频引擎未运行":trackMuted?micName()+" 被系统静音":"已连接 "+micName()+" · 输入为全零";
+  if(!inputWarningShown){
+    inputWarningShown=true;
+    showToast(contextStopped?"浏览器暂停了音频引擎，请再次点停止后重新开始。":"已取得麦克风权限，但收到的是全零数据。请在地址栏的网站权限和系统声音设置中检查所选麦克风。",4600);
+  }
 }
 function setupPcmCapture(){
   pcmRing=new Float32Array(Math.ceil(audioCtx.sampleRate*REWIND_SECONDS));pcmWrite=0;pcmCount=0;
@@ -656,10 +740,13 @@ function setStatus(text,kind=""){
 }
 function setRecordedStatus(){setStatus(lastElapsed>REWIND_SECONDS?"最近 30 秒":"已录制","done");}
 function friendlyMicError(err){
-  if(location.protocol==="file:"||!window.isSecureContext)return "iPhone 必须通过 HTTPS 网页打开，直接从“文件”App 打开无法使用实时麦克风。";
-  if(err&&err.name==="NotAllowedError")return "麦克风未获允许。请在 Safari 的“网站设置”中把麦克风改为允许。";
+  if(location.protocol==="file:"||!window.isSecureContext)return "实时麦克风需要 HTTPS。直接从本地文件打开时，浏览器可能拒绝麦克风。";
+  if(err&&err.name==="NotAllowedError")return "麦克风未获允许。请在浏览器地址栏的网站权限中允许麦克风，并检查系统麦克风权限。";
   if(err&&err.name==="NotFoundError")return "没有找到可用的麦克风。";
   if(err&&err.name==="NotReadableError")return "麦克风正被其他应用占用，请关闭占用后重试。";
+  if(err&&err.name==="SecurityError")return "浏览器的安全设置阻止了麦克风，请检查网站权限和系统隐私设置。";
+  if(err&&err.name==="AudioContextSuspended")return "浏览器暂停了音频引擎。请再次点击“开始记录”；如仍无信号，请关闭该标签页后重新打开。";
+  if(err&&err.name==="NoAudioTrack")return "浏览器没有从所选设备取得音频轨道，请换一个麦克风后重试。";
   return "无法打开麦克风"+(err&&err.name?"（"+err.name+"）":"")+"。";
 }
 async function startRecording(){
@@ -667,40 +754,49 @@ async function startRecording(){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){const msg=friendlyMicError(null);setStatus("无法开麦","error");showToast(msg,3400);return;}
   try{
     ui.record.disabled=true;await ensureAudio();
-    const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:1}});
+    const stream=await requestMicStream();
     stopPlayback();clearAll(true);micStream=stream;
+    micTrack=stream.getAudioTracks()[0]||null;
+    if(!micTrack){const err=new Error("没有音频轨道");err.name="NoAudioTrack";throw err;}
+    connectMicDiagnostics();
     sourceNode=audioCtx.createMediaStreamSource(stream);
     analyser=audioCtx.createAnalyser();
     /* 44.1/48 kHz 下约 85–93 ms、10.8–11.7 Hz/bin：以频率分辨率优先的窄带声谱。 */
     analyser.fftSize=4096;analyser.smoothingTimeConstant=.10;
     analyser.minDecibels=-120;analyser.maxDecibels=0;
     sourceNode.connect(analyser);
+    /* 显式接入零增益输出，确保桌面浏览器持续执行分析支路，同时绝不监听麦克风。 */
+    analysisSink=audioCtx.createGain();analysisSink.gain.value=0;
+    analyser.connect(analysisSink);analysisSink.connect(audioCtx.destination);
     timeData=new Float32Array(analyser.fftSize);freqData=new Uint8Array(analyser.frequencyBinCount);
     binHz=audioCtx.sampleRate/analyser.fftSize;storeBins=Math.min(freqData.length,Math.ceil(8000/binHz)+3);
     const canReplay=setupPcmCapture();
+    /* 权限弹窗可能再次挂起 AudioContext；图建立后必须重新确认。 */
+    await ensureAudio();
     recording=true;recordStartWall=performance.now()/1000;lastElapsed=0;lastAnalysisAt=0;lastPitchAt=0;lastMetricUpdate=0;
-    playheadTime=0;
+    inputSilenceSince=0;inputWarningShown=false;
+    playheadTime=0;reviewMode=false;
     latestPitch=null;latestCpp=null;pitchMidiSmooth=null;ui.record.classList.add("recording");
     ui.record.querySelector(".btnIcon").textContent="■";ui.record.querySelector(".btnText").textContent="停止记录";
-    ui.play.disabled=true;setStatus("记录中","live");ui.voiceState.textContent="等待声音";ui.empty.style.display="none";
+    ui.play.disabled=true;setStatus("记录中","live");ui.voiceState.textContent="已连接 "+micName()+" · 等待声音";ui.empty.style.display="none";
     if(!canReplay)showToast("图谱可持续记录，但此浏览器不支持 30 秒声音回放缓存。",3000);
     try{if(navigator.wakeLock)wakeLock=await navigator.wakeLock.request("screen");}catch(e){}
     rafId=requestAnimationFrame(analysisLoop);
   }catch(err){
     closePcmCapture();pcmRing=null;
-    try{if(sourceNode)sourceNode.disconnect();if(analyser)analyser.disconnect();}catch(e){}
-    sourceNode=null;analyser=null;
+    try{if(sourceNode)sourceNode.disconnect();if(analyser)analyser.disconnect();if(analysisSink)analysisSink.disconnect();}catch(e){}
+    sourceNode=null;analyser=null;analysisSink=null;micTrack=null;
     if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null;}
     setStatus("无法开麦","error");showToast(friendlyMicError(err),3800);
   }finally{ui.record.disabled=false;}
 }
 function stopRecording(message="记录完成"){
   if(!recording)return;
-  recording=false;if(rafId)cancelAnimationFrame(rafId);rafId=0;
+  recording=false;reviewMode=false;if(rafId)cancelAnimationFrame(rafId);rafId=0;
   closePcmCapture();finalizePcmPlayback();
   if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null;}
-  try{if(sourceNode)sourceNode.disconnect();if(analyser)analyser.disconnect();}catch(e){}
-  sourceNode=null;analyser=null;timeData=null;freqData=null;
+  try{if(sourceNode)sourceNode.disconnect();if(analyser)analyser.disconnect();if(analysisSink)analysisSink.disconnect();}catch(e){}
+  sourceNode=null;analyser=null;analysisSink=null;micTrack=null;timeData=null;freqData=null;
   playheadTime=lastElapsed;
   ui.record.classList.remove("recording");ui.record.querySelector(".btnIcon").textContent="●";
   ui.record.querySelector(".btnText").textContent="重新记录";setRecordedStatus();
@@ -729,6 +825,9 @@ function renderAtTime(time,resetPitch=false){
   if(!frames.length)return;
   const lo=earliestFrameTime(),hi=lastElapsed;
   playheadTime=Math.max(lo,Math.min(hi,time));
+  if(playbackBuffer&&!playbackPlaying){
+    playbackOffset=Math.max(0,Math.min(playbackBuffer.duration,playheadTime-playbackTimelineStart));
+  }
   rebuildLayers(playheadTime);drawComposite(playheadTime);ui.time.textContent=formatClock(playheadTime,true);
   const frame=frameNear(playheadTime);
   if(frame){if(resetPitch)pitchMidiSmooth=null;updateMetrics(frame,frame.pitch,frame.spec);}
@@ -741,10 +840,13 @@ function playbackVisualLoop(ts){
 }
 async function startPlaybackAt(time){
   if(!playbackBuffer)return;
-  await ensureAudio();stopPlayback(false);
   const start=playbackTimelineStart,end=playbackEndTime();
-  playheadTime=Math.max(start,Math.min(end,time));playbackOffset=playheadTime-start;
-  if(playbackOffset>=playbackBuffer.duration-.025){playbackOffset=0;playheadTime=start;renderAtTime(start,true);}
+  const requestedTime=Math.max(start,Math.min(end,time));
+  await ensureAudio();stopPlayback(false);
+  playheadTime=requestedTime;playbackOffset=playheadTime-start;
+  reviewMode=true;
+  if(playbackOffset>=playbackBuffer.duration-.025){playbackOffset=0;playheadTime=start;}
+  renderAtTime(playheadTime,true);
   const source=audioCtx.createBufferSource(),token=++playbackToken;
   source.buffer=playbackBuffer;source.connect(audioCtx.destination);playbackSource=source;
   playbackStartCtxTime=audioCtx.currentTime-playbackOffset;playbackPlaying=true;
@@ -769,7 +871,7 @@ function resetReadouts(){
   ui.band.textContent="—";ui.bandNote.textContent="高低频带能量比";ui.voiceState.textContent="等待声音";
 }
 function clearAll(removeAudio=true){
-  frames=[];lastElapsed=0;playheadTime=0;latestPitch=null;latestCpp=null;pitchMidiSmooth=null;clearLayers();drawComposite(0);resetReadouts();
+  frames=[];lastElapsed=0;playheadTime=0;reviewMode=false;latestPitch=null;latestCpp=null;pitchMidiSmooth=null;clearLayers();drawComposite(0);resetReadouts();
   ui.time.textContent="00:00.0";ui.empty.style.display="";
   if(removeAudio){stopPlayback(false);closePcmCapture();pcmRing=null;pcmCount=0;pcmWrite=0;
     playbackBuffer=null;playbackOffset=0;playbackTimelineStart=0;
@@ -777,12 +879,33 @@ function clearAll(removeAudio=true){
 }
 
 /* ---------- UI helpers ---------- */
+function signedDb(value){return (value>0?"+":"")+value+" dB";}
+function restoreSettings(){
+  let saved={};
+  try{saved=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");}catch(_){saved={};}
+  if(!saved||typeof saved!=="object")saved={};
+  const savedWindow=Number(saved.windowSec),savedFreq=Number(saved.maxFreq);
+  const savedFloor=Number(saved.floorDb),savedGain=Number(saved.loudnessGainDb);
+  if([6,8,12].includes(savedWindow))windowSec=savedWindow;
+  if([4000,5000,6000,8000].includes(savedFreq))maxFreq=savedFreq;
+  if(Number.isFinite(savedFloor))floorDb=Math.max(-100,Math.min(-58,Math.round(savedFloor)));
+  if(Number.isFinite(savedGain))loudnessGainDb=Math.max(-6,Math.min(18,Math.round(savedGain)));
+  if(typeof saved.highBoost==="boolean")highBoost=saved.highBoost;
+  ui.window.value=String(windowSec);ui.freq.value=String(maxFreq);
+  ui.floor.value=String(floorDb);ui.floorOut.value=(floorDb<0?"−":"")+Math.abs(floorDb)+" dB";
+  ui.waveGain.value=String(loudnessGainDb);ui.waveGainOut.value=signedDb(loudnessGainDb);
+  ui.boost.checked=highBoost;
+}
+function saveSettings(){
+  try{localStorage.setItem(SETTINGS_KEY,JSON.stringify({windowSec,maxFreq,floorDb,loudnessGainDb,highBoost}));}catch(_){}
+}
 function showToast(text,duration=2200){
   const t=$("toast");t.textContent=text;t.classList.add("show");clearTimeout(toastTimer);
   toastTimer=setTimeout(()=>t.classList.remove("show"),duration);
 }
 function scheduleRebuild(){
   cancelAnimationFrame(scheduleRebuild._id);
+  /* 只重绘离屏图层；不改扫描线、回放位置、图谱帧或声音缓存。 */
   scheduleRebuild._id=requestAnimationFrame(()=>{rebuildLayers(playheadTime);drawComposite(playheadTime);});
 }
 function requestScrubRender(time){
@@ -811,10 +934,11 @@ function updateSecurityNotice(){
 ui.record.addEventListener("click",()=>recording?stopRecording():startRecording());
 ui.play.addEventListener("click",togglePlayback);
 ui.clear.addEventListener("click",()=>{if(recording){showToast("请先停止记录。",1800);return;}clearAll(true);});
-ui.window.addEventListener("change",()=>{windowSec=Number(ui.window.value);scheduleRebuild();});
-ui.freq.addEventListener("change",()=>{maxFreq=Number(ui.freq.value);scheduleRebuild();});
-ui.floor.addEventListener("input",()=>{floorDb=Number(ui.floor.value);ui.floorOut.value=(floorDb<0?"−":"")+Math.abs(floorDb)+" dB";scheduleRebuild();});
-ui.boost.addEventListener("change",()=>{highBoost=ui.boost.checked;scheduleRebuild();});
+ui.window.addEventListener("change",()=>{windowSec=Number(ui.window.value);saveSettings();scheduleRebuild();});
+ui.freq.addEventListener("change",()=>{maxFreq=Number(ui.freq.value);saveSettings();scheduleRebuild();});
+ui.floor.addEventListener("input",()=>{floorDb=Number(ui.floor.value);ui.floorOut.value=(floorDb<0?"−":"")+Math.abs(floorDb)+" dB";saveSettings();scheduleRebuild();});
+ui.waveGain.addEventListener("input",()=>{loudnessGainDb=Number(ui.waveGain.value);ui.waveGainOut.value=signedDb(loudnessGainDb);saveSettings();scheduleRebuild();});
+ui.boost.addEventListener("change",()=>{highBoost=ui.boost.checked;saveSettings();scheduleRebuild();});
 (function enableTimelineScrub(){
   let down=false,scrubbing=false,startX=0,startY=0,startTime=0,wasPlaying=false;
   shell.addEventListener("pointerdown",e=>{
@@ -828,6 +952,7 @@ ui.boost.addEventListener("change",()=>{highBoost=ui.boost.checked;scheduleRebui
       if(Math.abs(dx)<8||Math.abs(dx)<=Math.abs(dy)*1.15)return;
       scrubbing=true;wasPlaying=playbackPlaying;
       if(playbackPlaying)stopPlayback(true);
+      reviewMode=true;
       startTime=playheadTime+dx/(layout.plotW/windowSec);
       shell.classList.add("scrubbing");setStatus("回看中");
       try{shell.setPointerCapture(e.pointerId);}catch(_){}
@@ -839,6 +964,7 @@ ui.boost.addEventListener("change",()=>{highBoost=ui.boost.checked;scheduleRebui
     if(!down)return;down=false;
     if(!scrubbing)return;
     scrubbing=false;shell.classList.remove("scrubbing");flushScrubRender();
+    if(playbackBuffer)playbackOffset=Math.max(0,Math.min(playbackBuffer.duration,playheadTime-playbackTimelineStart));
     ui.voiceState.textContent="已定位到 "+formatClock(playheadTime,true)+(playbackBuffer?"":" · 仅可回看图谱");
     if(wasPlaying&&playbackBuffer)startPlaybackAt(playheadTime).catch(()=>showToast("无法继续回放。"));
     else setRecordedStatus();
@@ -851,7 +977,7 @@ window.addEventListener("orientationchange",()=>setTimeout(resizeCanvas,180));
 document.addEventListener("visibilitychange",()=>{if(document.hidden&&recording)stopRecording("页面进入后台，记录已停止");});
 window.addEventListener("pagehide",()=>{if(recording)stopRecording("页面已离开");stopPlayback(false);});
 
-updateSecurityNotice();resizeCanvas();clearAll(true);
+restoreSettings();updateSecurityNotice();resizeCanvas();clearAll(true);
 </script>
 </body>
 </html>
