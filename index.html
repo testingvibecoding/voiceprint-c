@@ -164,7 +164,7 @@
 
     <section class="metrics" aria-label="实时读数">
       <div class="metric"><label>响度</label><b id="levelValue">−∞ dBFS</b><small>相对响度，非校准声压级</small></div>
-      <div class="metric"><label>基频 F0</label><b id="pitchValue">—</b><small id="noteValue">未检测到稳定音高</small></div>
+      <div class="metric"><label>基频 / 音高</label><b id="pitchValue">—</b><small id="noteValue">未检测到稳定音高</small></div>
       <div class="metric"><label>清晰度（CPP）</label><b id="clarityValue">—</b><small id="clarityNote">倒谱峰突出度近似值</small></div>
       <div class="metric"><label>明亮度 2–4 / 0–1 kHz</label><b id="bandValue">—</b><small id="bandNote">高低频带能量比</small></div>
     </section>
@@ -229,7 +229,7 @@
     </details>
 
     <div class="notice" id="secureNotice"></div>
-    <footer class="versionNote">v1.7 · 最近更新：实时滚动、平滑扫描线、回放读数</footer>
+    <footer class="versionNote">v1.9 · 最近更新：回放增益与音名式基频读数</footer>
   </main>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -260,7 +260,7 @@ let windowSec=8,maxFreq=5000,floorDb=-100,loudnessGainDb=3,loudnessGateDb=-55,hi
 let audioCtx=null,analyser=null,analysisSink=null,micStream=null,micTrack=null,sourceNode=null,timeData=null,freqData=null;
 let recording=false,recordStartWall=0,lastElapsed=0,lastAnalysisAt=0,lastPitchAt=0;
 let pcmProcessor=null,pcmRing=null,pcmWrite=0,pcmCount=0,wakeLock=null;
-let playbackBuffer=null,playbackSource=null,playbackPlaying=false,playbackOffset=0;
+let playbackBuffer=null,playbackSource=null,playbackGainNode=null,playbackLimiterNode=null,playbackPlaying=false,playbackOffset=0;
 let playbackStartCtxTime=0,playbackTimelineStart=0,playbackToken=0;
 let frames=[],binHz=0,storeBins=0,lastPaintX=-1,scrollRemainder=0,rafId=0;
 let layerViewStart=NaN,layerWindowSec=0;
@@ -271,7 +271,7 @@ let latestPitch=null,latestCpp=null,pitchMidiSmooth=null,lastMetricUpdate=0,toas
 let smoothedLoudnessDb=-120;
 let inputSilenceSince=0,inputWarningShown=false;
 let cppRe=null,cppIm=null,cppWindow=null,cppN=0;
-const REWIND_SECONDS=60,PLAYHEAD_RATIO=.76,PLAYBACK_LINE_RATIO=.25,PLAYBACK_MAX_RATIO=.50,ANALYSIS_INTERVAL=1/27,PITCH_INTERVAL=.085;
+const REWIND_SECONDS=60,PLAYHEAD_RATIO=.76,PLAYBACK_LINE_RATIO=.25,PLAYBACK_MAX_RATIO=.50,PLAYBACK_GAIN=3,ANALYSIS_INTERVAL=1/27,PITCH_INTERVAL=.085;
 const SETTINGS_KEY="voiceprint.display-settings.v1";
 const NOTE_NAMES=["C","C♯","D","E♭","E","F","F♯","G","A♭","A","B♭","B"];
 
@@ -682,8 +682,8 @@ function updateMetrics(stats,pitch,spec){
     if(pitchMidiSmooth==null||Math.abs(midi-pitchMidiSmooth)>8)pitchMidiSmooth=midi;
     else pitchMidiSmooth=pitchMidiSmooth*.68+midi*.32;
     const note=midiName(pitchMidiSmooth),freq=440*Math.pow(2,(pitchMidiSmooth-69)/12);
-    ui.pitch.textContent=Math.round(freq)+" Hz";
-    ui.note.textContent=note.name+"  "+(note.cents>0?"+":"")+note.cents+" cent";
+    ui.pitch.textContent=note.name;
+    ui.note.textContent=Math.round(freq)+" Hz · "+(note.cents>0?"+":"")+note.cents+" cent";
   }else{
     pitchMidiSmooth=null;ui.pitch.textContent="—";ui.note.textContent="未检测到稳定音高";
   }
@@ -909,6 +909,10 @@ function currentPlaybackOffset(){
   if(!playbackPlaying||!audioCtx)return playbackOffset;
   return Math.max(0,Math.min(playbackBuffer.duration,audioCtx.currentTime-playbackStartCtxTime));
 }
+function disconnectPlaybackOutput(){
+  if(playbackGainNode){try{playbackGainNode.disconnect();}catch(e){}playbackGainNode=null;}
+  if(playbackLimiterNode){try{playbackLimiterNode.disconnect();}catch(e){}playbackLimiterNode=null;}
+}
 function stopPlayback(updatePosition=true){
   let heldRatio=reviewLineRatio;
   if(playbackPlaying){
@@ -919,6 +923,7 @@ function stopPlayback(updatePosition=true){
   playbackPlaying=false;playbackToken++;
   if(reviewMode&&!recording)reviewLineRatio=Math.min(PLAYBACK_MAX_RATIO,heldRatio);
   if(playbackSource){try{playbackSource.onended=null;playbackSource.stop();playbackSource.disconnect();}catch(e){}playbackSource=null;}
+  disconnectPlaybackOutput();
   if(playbackRaf)cancelAnimationFrame(playbackRaf);playbackRaf=0;
   ui.play.querySelector(".btnIcon").textContent="▶";ui.play.querySelector(".btnText").textContent="回放";
 }
@@ -959,12 +964,17 @@ async function startPlaybackAt(time){
   playbackStartLineRatio=Math.min(PLAYBACK_MAX_RATIO,reviewMode?reviewLineRatio:PLAYBACK_LINE_RATIO);
   reviewMode=true;reviewLineRatio=playbackStartLineRatio;playbackAnchorTime=playheadTime;
   const source=audioCtx.createBufferSource(),token=++playbackToken;
-  source.buffer=playbackBuffer;source.connect(audioCtx.destination);playbackSource=source;
+  const gain=audioCtx.createGain(),limiter=audioCtx.createDynamicsCompressor();
+  gain.gain.value=PLAYBACK_GAIN;
+  limiter.threshold.value=-2;limiter.knee.value=0;limiter.ratio.value=20;limiter.attack.value=.003;limiter.release.value=.12;
+  source.buffer=playbackBuffer;source.connect(gain);gain.connect(limiter);limiter.connect(audioCtx.destination);
+  playbackSource=source;playbackGainNode=gain;playbackLimiterNode=limiter;
   playbackStartCtxTime=audioCtx.currentTime-playbackOffset;playbackPlaying=true;
   renderAtTime(playheadTime,true);
   source.onended=()=>{
     if(token!==playbackToken||!playbackPlaying)return;
-    reviewLineRatio=activeLineRatio(playbackEndTime());playbackPlaying=false;playbackSource=null;playbackOffset=playbackBuffer.duration;
+    reviewLineRatio=activeLineRatio(playbackEndTime());playbackPlaying=false;
+    try{source.disconnect();}catch(e){}playbackSource=null;disconnectPlaybackOutput();playbackOffset=playbackBuffer.duration;
     playheadTime=playbackEndTime();renderAtTime(playheadTime,true);
     ui.play.querySelector(".btnIcon").textContent="▶";ui.play.querySelector(".btnText").textContent="回放";setRecordedStatus();
   };
