@@ -103,6 +103,7 @@
   .notice{display:none;margin-top:8px;padding:10px 12px;border:1px solid #6b4b20;border-radius:11px;
     background:#271d0e;color:#f0ca89;font-size:10px;line-height:1.55}
   .notice.show{display:block}
+  .versionNote{padding:18px 4px 3px;text-align:center;color:#566273;font-size:9px;line-height:1.4}
   #toast{position:fixed;left:50%;bottom:calc(86px + env(safe-area-inset-bottom));z-index:99;transform:translateX(-50%) translateY(8px);
     max-width:calc(100vw - 32px);padding:9px 13px;border:1px solid #394456;border-radius:10px;
     background:rgba(18,23,31,.96);color:#e8eef4;font-size:11px;line-height:1.4;opacity:0;pointer-events:none;
@@ -162,7 +163,7 @@
     </section>
 
     <section class="metrics" aria-label="实时读数">
-      <div class="metric"><label>输入电平</label><b id="levelValue">−∞ dBFS</b><small>相对电平，非声压级</small></div>
+      <div class="metric"><label>响度</label><b id="levelValue">−∞ dBFS</b><small>相对响度，非校准声压级</small></div>
       <div class="metric"><label>基频 F0</label><b id="pitchValue">—</b><small id="noteValue">未检测到稳定音高</small></div>
       <div class="metric"><label>清晰度（CPP）</label><b id="clarityValue">—</b><small id="clarityNote">倒谱峰突出度近似值</small></div>
       <div class="metric"><label>明亮度 2–4 / 0–1 kHz</label><b id="bandValue">—</b><small id="bandNote">高低频带能量比</small></div>
@@ -228,6 +229,7 @@
     </details>
 
     <div class="notice" id="secureNotice"></div>
+    <footer class="versionNote">v1.7 · 最近更新：实时滚动、平滑扫描线、回放读数</footer>
   </main>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -238,8 +240,10 @@
 /* ---------- DOM / state ---------- */
 const $=id=>document.getElementById(id);
 const scope=$("scope"), shell=$("canvasShell"), ctx=scope.getContext("2d",{alpha:false});
-const waveLayer=document.createElement("canvas"), specLayer=document.createElement("canvas");
-const waveCtx=waveLayer.getContext("2d"), specCtx=specLayer.getContext("2d",{alpha:false});
+let waveLayer=document.createElement("canvas"),specLayer=document.createElement("canvas");
+let waveBackLayer=document.createElement("canvas"),specBackLayer=document.createElement("canvas");
+let waveCtx=waveLayer.getContext("2d"),specCtx=specLayer.getContext("2d",{alpha:false});
+let waveBackCtx=waveBackLayer.getContext("2d"),specBackCtx=specBackLayer.getContext("2d",{alpha:false});
 const ui={
   status:$("statusPill"),voiceState:$("voiceState"),time:$("timeReadout"),empty:$("emptyState"),
   record:$("recordBtn"),play:$("playBtn"),clear:$("clearBtn"),
@@ -261,6 +265,7 @@ let playbackStartCtxTime=0,playbackTimelineStart=0,playbackToken=0;
 let frames=[],binHz=0,storeBins=0,lastPaintX=-1,scrollRemainder=0,rafId=0;
 let layerViewStart=NaN,layerWindowSec=0;
 let playheadTime=0,playbackRaf=0,lastPlaybackRender=0,scrubRenderRaf=0,pendingScrubTime=null;
+let reviewLineRaf=0,reviewLineDone=null;
 let reviewMode=false,reviewLineRatio=.76,playbackAnchorTime=0,playbackStartLineRatio=.25;
 let latestPitch=null,latestCpp=null,pitchMidiSmooth=null,lastMetricUpdate=0,toastTimer=0;
 let smoothedLoudnessDb=-120;
@@ -290,8 +295,11 @@ function resizeCanvas(){
   ctx.setTransform(DPR,0,0,DPR,0,0);
   layout=computeLayout();
   waveLayer.width=layout.plotW;waveLayer.height=layout.waveH;
+  waveBackLayer.width=layout.plotW;waveBackLayer.height=layout.waveH;
   specLayer.width=layout.plotW;specLayer.height=layout.specH;
-  waveCtx.imageSmoothingEnabled=false;specCtx.imageSmoothingEnabled=false;
+  specBackLayer.width=layout.plotW;specBackLayer.height=layout.specH;
+  waveCtx.imageSmoothingEnabled=false;waveBackCtx.imageSmoothingEnabled=false;
+  specCtx.imageSmoothingEnabled=false;specBackCtx.imageSmoothingEnabled=false;
   rebuildLayers(playheadTime);
   drawComposite(playheadTime);
 }
@@ -373,32 +381,32 @@ function paintColumns(frame,x1,x2){
 }
 function clearLayers(){
   waveCtx.clearRect(0,0,waveLayer.width,waveLayer.height);
+  waveBackCtx.clearRect(0,0,waveBackLayer.width,waveBackLayer.height);
   specCtx.fillStyle="#010205";specCtx.fillRect(0,0,specLayer.width,specLayer.height);
+  specBackCtx.fillStyle="#010205";specBackCtx.fillRect(0,0,specBackLayer.width,specBackLayer.height);
   specColumn=null;lastPaintX=-1;scrollRemainder=0;layerViewStart=NaN;layerWindowSec=0;
 }
-function shiftLayers(px){
-  px=Math.max(1,Math.min(layout.plotW,px));
-  if(px>=layout.plotW){
-    waveCtx.clearRect(0,0,layout.plotW,layout.waveH);
-    specCtx.fillStyle="#010205";specCtx.fillRect(0,0,layout.plotW,layout.specH);
-    return;
-  }
-  waveCtx.drawImage(waveLayer,px,0,layout.plotW-px,layout.waveH,0,0,layout.plotW-px,layout.waveH);
-  waveCtx.clearRect(layout.plotW-px,0,px,layout.waveH);
-  specCtx.drawImage(specLayer,px,0,layout.plotW-px,layout.specH,0,0,layout.plotW-px,layout.specH);
-  specCtx.fillStyle="#010205";specCtx.fillRect(layout.plotW-px,0,px,layout.specH);
+function swapLayerBuffers(){
+  [waveLayer,waveBackLayer]=[waveBackLayer,waveLayer];
+  [specLayer,specBackLayer]=[specBackLayer,specLayer];
+  [waveCtx,waveBackCtx]=[waveBackCtx,waveCtx];
+  [specCtx,specBackCtx]=[specBackCtx,specCtx];
 }
 function moveLayers(px){
   px=Math.trunc(px);
   if(!px)return;
-  if(px<0){shiftLayers(-px);return;}
-  px=Math.min(layout.plotW,px);
-  if(px>=layout.plotW){clearLayers();return;}
-  waveCtx.drawImage(waveLayer,0,0,layout.plotW-px,layout.waveH,px,0,layout.plotW-px,layout.waveH);
-  waveCtx.clearRect(0,0,px,layout.waveH);
-  specCtx.drawImage(specLayer,0,0,layout.plotW-px,layout.specH,px,0,layout.plotW-px,layout.specH);
-  specCtx.fillStyle="#010205";specCtx.fillRect(0,0,px,layout.specH);
+  px=Math.max(-layout.plotW,Math.min(layout.plotW,px));
+  waveBackCtx.clearRect(0,0,layout.plotW,layout.waveH);
+  specBackCtx.fillStyle="#010205";specBackCtx.fillRect(0,0,layout.plotW,layout.specH);
+  const amount=Math.abs(px),copyW=layout.plotW-amount;
+  if(copyW>0){
+    const sourceX=px<0?amount:0,destX=px>0?amount:0;
+    waveBackCtx.drawImage(waveLayer,sourceX,0,copyW,layout.waveH,destX,0,copyW,layout.waveH);
+    specBackCtx.drawImage(specLayer,sourceX,0,copyW,layout.specH,destX,0,copyW,layout.specH);
+  }
+  swapLayerBuffers();
 }
+function shiftLayers(px){moveLayers(-Math.max(1,Math.min(layout.plotW,px)));}
 function earliestFrameTime(){return frames.length?frames[0].t:0;}
 function reviewEarliestTime(){return playbackBuffer?Math.max(earliestFrameTime(),playbackTimelineStart):earliestFrameTime();}
 function activeLineRatio(atTime=playheadTime){
@@ -495,7 +503,9 @@ function appendFrameToLayers(frame,previousT){
   if(step>0){
     scrollRemainder-=step;shiftLayers(step);
     if(Number.isFinite(layerViewStart))layerViewStart+=step/(layout.plotW/windowSec);
-    paintColumns(frame,Math.max(0,anchorX-step+1),anchorX);
+    const from=Math.max(0,anchorX-step+1);
+    /* 新时间片必须先清空，避免较小的新包络叠盖在较大的旧包络上。 */
+    clearLayerStrip(from,anchorX);paintColumns(frame,from,anchorX);
     lastPaintX=anchorX;
   }
 }
@@ -665,7 +675,7 @@ function spectralMetrics(freqBytes,cppDb){
 }
 function updateMetrics(stats,pitch,spec){
   const meterDb=Number.isFinite(stats.loudnessDb)?stats.loudnessDb:stats.levelDb;
-  ui.level.textContent=meterDb<=loudnessGateDb?"门限以下":meterDb.toFixed(1)+" dBFS";
+  ui.level.textContent=Number.isFinite(meterDb)&&meterDb>-119.5?meterDb.toFixed(1)+" dBFS":"−∞ dBFS";
   const voiced=pitch&&stats.levelDb>-63;
   if(voiced){
     let midi=69+12*Math.log2(pitch.f/440);
@@ -841,6 +851,7 @@ function friendlyMicError(err){
 }
 async function startRecording(){
   if(recording)return;
+  cancelReviewLineAnimation();
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){const msg=friendlyMicError(null);setStatus("无法开麦","error");showToast(msg,3400);return;}
   try{
     ui.record.disabled=true;await ensureAudio();
@@ -882,7 +893,7 @@ async function startRecording(){
 }
 function stopRecording(message="记录完成"){
   if(!recording)return;
-  recording=false;reviewMode=false;reviewLineRatio=PLAYHEAD_RATIO;if(rafId)cancelAnimationFrame(rafId);rafId=0;
+  cancelReviewLineAnimation();recording=false;reviewMode=false;reviewLineRatio=PLAYHEAD_RATIO;if(rafId)cancelAnimationFrame(rafId);rafId=0;
   closePcmCapture();finalizePcmPlayback();
   if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null;}
   try{if(sourceNode)sourceNode.disconnect();if(analyser)analyser.disconnect();if(analysisSink)analysisSink.disconnect();}catch(e){}
@@ -930,14 +941,19 @@ function renderAtTime(time,resetPitch=false){
 }
 function playbackVisualLoop(ts){
   if(!playbackPlaying){playbackRaf=0;return;}
-  playheadTime=playbackTimelineStart+currentPlaybackOffset();
-  if(ts-lastPlaybackRender>40){lastPlaybackRender=ts;renderAtTime(playheadTime,false);}
+  playheadTime=Math.min(playbackEndTime(),playbackTimelineStart+currentPlaybackOffset());
+  /* 每个动画帧移动扫描线；读数降低刷新率，避免影响画面流畅度。 */
+  updateLayersForTime(playheadTime);drawComposite(playheadTime);ui.time.textContent=formatClock(playheadTime,true);
+  if(ts-lastPlaybackRender>90){
+    lastPlaybackRender=ts;const frame=frameNear(playheadTime);
+    if(frame)updateMetrics(frame,frame.pitch,frame.spec);
+  }
   playbackRaf=requestAnimationFrame(playbackVisualLoop);
 }
 async function startPlaybackAt(time){
   if(!playbackBuffer)return;
   const start=playbackTimelineStart,end=playbackEndTime();
-  await ensureAudio();stopPlayback(false);
+  cancelReviewLineAnimation();await ensureAudio();stopPlayback(false);
   playheadTime=Math.max(reviewEarliestTime(),Math.min(end,time));playbackOffset=playheadTime-start;
   if(playbackOffset>=playbackBuffer.duration-.025){playheadTime=reviewEarliestTime();playbackOffset=playheadTime-start;}
   playbackStartLineRatio=Math.min(PLAYBACK_MAX_RATIO,reviewMode?reviewLineRatio:PLAYBACK_LINE_RATIO);
@@ -959,6 +975,8 @@ async function startPlaybackAt(time){
 async function togglePlayback(){
   if(!playbackBuffer)return;
   if(playbackPlaying){stopPlayback(true);renderAtTime(playheadTime,true);setRecordedStatus();return;}
+  const begin=()=>startPlaybackAt(playheadTime).catch(()=>showToast("无法开始回放，请再点一次。",2200));
+  if(reviewMode&&reviewLineRatio>PLAYBACK_MAX_RATIO+.001){animateReviewLineTo(PLAYBACK_MAX_RATIO,140,begin);return;}
   try{await startPlaybackAt(playheadTime);}catch(e){showToast("无法开始回放，请再点一次。",2200);}
 }
 function resetReadouts(){
@@ -967,7 +985,7 @@ function resetReadouts(){
   ui.band.textContent="—";ui.bandNote.textContent="高低频带能量比";ui.voiceState.textContent="等待声音";
 }
 function clearAll(removeAudio=true){
-  frames=[];lastElapsed=0;playheadTime=0;reviewMode=false;reviewLineRatio=PLAYHEAD_RATIO;playbackAnchorTime=0;playbackStartLineRatio=PLAYBACK_LINE_RATIO;latestPitch=null;latestCpp=null;pitchMidiSmooth=null;smoothedLoudnessDb=-120;clearLayers();drawComposite(0);resetReadouts();
+  cancelReviewLineAnimation();frames=[];lastElapsed=0;playheadTime=0;reviewMode=false;reviewLineRatio=PLAYHEAD_RATIO;playbackAnchorTime=0;playbackStartLineRatio=PLAYBACK_LINE_RATIO;latestPitch=null;latestCpp=null;pitchMidiSmooth=null;smoothedLoudnessDb=-120;clearLayers();drawComposite(0);resetReadouts();
   ui.time.textContent="00:00.0";ui.empty.style.display="";
   if(removeAudio){stopPlayback(false);closePcmCapture();pcmRing=null;pcmCount=0;pcmWrite=0;
     playbackBuffer=null;playbackOffset=0;playbackTimelineStart=0;
@@ -1007,6 +1025,33 @@ function scheduleRebuild(){
   /* 只重绘离屏图层；不改扫描线、回放位置、图谱帧或声音缓存。 */
   scheduleRebuild._id=requestAnimationFrame(()=>{rebuildLayers(playheadTime);drawComposite(playheadTime);});
 }
+function cancelReviewLineAnimation(){
+  if(reviewLineRaf)cancelAnimationFrame(reviewLineRaf);
+  reviewLineRaf=0;reviewLineDone=null;
+}
+function animateReviewLineTo(target,duration=220,done=null){
+  cancelReviewLineAnimation();
+  target=Math.max(PLAYBACK_LINE_RATIO,Math.min(PLAYHEAD_RATIO,target));
+  const from=reviewLineRatio;
+  reviewMode=true;
+  if(Math.abs(target-from)<.0005){
+    reviewLineRatio=target;updateLayersForTime(playheadTime);drawComposite(playheadTime);
+    if(done)done();return;
+  }
+  const started=performance.now();reviewLineDone=done;
+  const tick=now=>{
+    if(recording||playbackPlaying){cancelReviewLineAnimation();return;}
+    const p=Math.max(0,Math.min(1,(now-started)/Math.max(1,duration)));
+    const eased=1-Math.pow(1-p,3);
+    reviewLineRatio=from+(target-from)*eased;
+    updateLayersForTime(playheadTime);drawComposite(playheadTime);
+    if(p<1){reviewLineRaf=requestAnimationFrame(tick);return;}
+    reviewLineRaf=0;reviewLineRatio=target;
+    const callback=reviewLineDone;reviewLineDone=null;
+    if(callback)callback();
+  };
+  reviewLineRaf=requestAnimationFrame(tick);
+}
 function requestScrubRender(time){
   const lo=reviewEarliestTime(),hi=playbackBuffer?playbackEndTime():lastElapsed;
   pendingScrubTime=Math.max(lo,Math.min(hi,time));playheadTime=pendingScrubTime;
@@ -1041,11 +1086,11 @@ ui.waveGain.addEventListener("input",()=>{loudnessGainDb=Number(ui.waveGain.valu
 ui.loudnessGate.addEventListener("input",()=>{loudnessGateDb=Number(ui.loudnessGate.value);ui.loudnessGateOut.value=gateDbLabel(loudnessGateDb);saveSettings();scheduleRebuild();});
 ui.boost.addEventListener("change",()=>{highBoost=ui.boost.checked;saveSettings();scheduleRebuild();});
 (function enableTimelineScrub(){
-  let down=false,scrubbing=false,startX=0,startY=0,startTime=0,wasPlaying=false,lineStartRatio=PLAYHEAD_RATIO,hitEarliest=false;
+  let down=false,scrubbing=false,startX=0,startY=0,startTime=0,wasPlaying=false,hitEarliest=false;
   shell.addEventListener("pointerdown",e=>{
     if(recording||!frames.length||(e.pointerType==="mouse"&&e.button!==0))return;
     down=true;scrubbing=false;startX=e.clientX;startY=e.clientY;startTime=playheadTime;wasPlaying=false;
-    lineStartRatio=activeLineRatio(playheadTime);hitEarliest=false;
+    hitEarliest=false;
   });
   shell.addEventListener("pointermove",e=>{
     if(!down)return;
@@ -1054,15 +1099,12 @@ ui.boost.addEventListener("change",()=>{highBoost=ui.boost.checked;saveSettings(
       if(Math.abs(dx)<8||Math.abs(dx)<=Math.abs(dy)*1.15)return;
       scrubbing=true;wasPlaying=playbackPlaying;
       if(playbackPlaying)stopPlayback(true);
-      lineStartRatio=activeLineRatio(playheadTime);reviewMode=true;
+      reviewMode=true;animateReviewLineTo(PLAYBACK_LINE_RATIO,220);
       startTime=playheadTime+dx/(layout.plotW/windowSec);
       shell.classList.add("scrubbing");setStatus("回看中");
       try{shell.setPointerCapture(e.pointerId);}catch(_){}
     }
     e.preventDefault();dx=e.clientX-startX;
-    const travel=Math.max(38,Math.min(72,layout.plotW*.11));
-    const p=Math.max(0,Math.min(1,(Math.abs(dx)-8)/Math.max(1,travel-8))),eased=1-Math.pow(1-p,3);
-    reviewLineRatio=lineStartRatio+(PLAYBACK_LINE_RATIO-lineStartRatio)*eased;
     const requested=startTime-dx/(layout.plotW/windowSec);
     if(requested<=reviewEarliestTime())hitEarliest=true;
     requestScrubRender(requested);
@@ -1070,12 +1112,15 @@ ui.boost.addEventListener("change",()=>{highBoost=ui.boost.checked;saveSettings(
   const finish=e=>{
     if(!down)return;down=false;
     if(!scrubbing)return;
-    scrubbing=false;shell.classList.remove("scrubbing");reviewLineRatio=PLAYBACK_LINE_RATIO;flushScrubRender();renderAtTime(playheadTime,true);
+    scrubbing=false;shell.classList.remove("scrubbing");flushScrubRender();renderAtTime(playheadTime,true);
     if(playbackBuffer)playbackOffset=Math.max(0,Math.min(playbackBuffer.duration,playheadTime-playbackTimelineStart));
     ui.voiceState.textContent="已定位到 "+formatClock(playheadTime,true)+(playbackBuffer?"":" · 仅可回看图谱");
     if(hitEarliest)showToast("已到最早可回放位置（最近 1 分钟）",1800);
-    if(wasPlaying&&playbackBuffer)startPlaybackAt(playheadTime).catch(()=>showToast("无法继续回放。"));
-    else setRecordedStatus();
+    if(wasPlaying&&playbackBuffer){
+      const resume=()=>startPlaybackAt(playheadTime).catch(()=>showToast("无法继续回放。"));
+      const duration=Math.max(70,220*Math.abs(reviewLineRatio-PLAYBACK_LINE_RATIO)/(PLAYHEAD_RATIO-PLAYBACK_LINE_RATIO));
+      animateReviewLineTo(PLAYBACK_LINE_RATIO,duration,resume);
+    }else{animateReviewLineTo(PLAYBACK_LINE_RATIO,180);setRecordedStatus();}
     try{shell.releasePointerCapture(e.pointerId);}catch(_){}
   };
   shell.addEventListener("pointerup",finish);shell.addEventListener("pointercancel",finish);
