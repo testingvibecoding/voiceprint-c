@@ -21,10 +21,18 @@
   button,select,input{font:inherit}
   button{touch-action:manipulation}
   #app{width:min(100%,760px);margin:0 auto;padding:12px 10px calc(18px + env(safe-area-inset-bottom))}
-  header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:2px 4px 10px}
+  header{padding:2px 4px 10px}
+  .headerTop{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+  .brand{min-width:0}
   .eyebrow{font-size:10px;line-height:1.2;letter-spacing:.2em;color:#5eaef2;font-weight:700}
-  h1{font-size:22px;line-height:1.15;margin:3px 0 4px;letter-spacing:.02em}
-  header p{font-size:11px;line-height:1.45;margin:0;color:var(--muted)}
+  .titleRow{display:flex;align-items:center;gap:7px;margin-top:3px}
+  h1{font-size:22px;line-height:1.15;margin:0;letter-spacing:.02em}
+  .infoBtn{width:23px;height:23px;display:grid;place-items:center;padding:0;border:1px solid #536173;border-radius:50%;
+    background:transparent;color:#a8b5c3;font-family:Georgia,serif;font-size:14px;font-weight:700;line-height:1;cursor:pointer}
+  .infoBtn[aria-expanded="true"]{border-color:#5eaef2;color:#8fc8f7;background:#102236}
+  .infoPanel{margin:7px 0 0;padding:9px 11px;border-left:2px solid #397eb8;background:#0c1118;color:#96a4b5;
+    font-size:10px;line-height:1.55}
+  .infoPanel[hidden]{display:none}
   .statusPill{flex:0 0 auto;display:flex;align-items:center;gap:7px;min-height:29px;padding:0 10px;
     border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--muted);
     font-size:11px;font-variant-numeric:tabular-nums}
@@ -61,10 +69,11 @@
   .swatch.energy{height:7px;background:linear-gradient(90deg,#03150d,#087a45,#28df83,#eafff1)}
   .legend .grow{flex:1}
 
-  .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:8px 0}
-  .metric{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:8px 9px}
-  .metric label{display:block;color:var(--muted);font-size:9px;line-height:1.2;margin-bottom:5px;white-space:nowrap}
-  .metric b{display:block;color:#eaf2fa;font-size:15px;line-height:1.1;font-variant-numeric:tabular-nums;
+  .metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin:8px 0 0;padding-top:8px;border-top:1px solid #202936}
+  .metric{min-width:0;padding:0 9px;border-right:1px solid #202936}
+  .metric:first-child{padding-left:0}.metric:last-child{padding-right:0;border-right:0}
+  .metric label{display:block;color:var(--muted);font-size:9px;line-height:1.2;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .metric b{display:block;color:#eaf2fa;font-size:14px;line-height:1.1;font-variant-numeric:tabular-nums;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .metric small{display:block;color:#657286;font-size:9px;line-height:1.2;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
@@ -111,13 +120,12 @@
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   @media(max-width:520px){
     #app{padding-left:7px;padding-right:7px}
-    .metrics{grid-template-columns:1fr 1fr}
-    .metric{padding:7px 9px}
-    .metric b{font-size:14px}
+    .metric{padding:0 5px}
+    .metric label,.metric small{font-size:8px}
+    .metric b{font-size:12px}
   }
   @media(max-height:720px){
     .canvasShell{height:390px}
-    header p{display:none}
     h1{font-size:19px}
   }
   @media(orientation:landscape) and (max-height:520px){
@@ -133,12 +141,23 @@
 <body>
 <div id="app">
   <header>
-    <div>
-      <div class="eyebrow">VOICEPRINT</div>
-      <h1>声纹扫描</h1>
-      <p>紫色响度包络 + 绿色窄带实时频谱图 · 建议佩戴耳机并在安静环境使用</p>
+    <div class="headerTop">
+      <div class="brand">
+        <div class="eyebrow">VOICEPRINT</div>
+        <div class="titleRow">
+          <h1>声纹扫描</h1>
+          <button id="infoBtn" class="infoBtn" type="button" aria-label="说明" aria-expanded="false" aria-controls="infoPanel">i</button>
+        </div>
+      </div>
+      <div id="statusPill" class="statusPill" aria-live="polite"><i></i><span>待机</span></div>
     </div>
-    <div id="statusPill" class="statusPill" aria-live="polite"><i></i><span>待机</span></div>
+    <div id="infoPanel" class="infoPanel" hidden>紫色为响度包络，绿色为窄带频谱图，横向亮线为基频与谐波。建议佩戴耳机，并在安静环境中保持手机与嘴部距离一致。</div>
+    <section class="metrics" aria-label="实时监测指标">
+      <div class="metric"><label>响度</label><b id="levelValue">−∞ dBFS</b><small>相对响度</small></div>
+      <div class="metric"><label>基频</label><b id="pitchValue">—</b><small id="noteValue">等待音高</small></div>
+      <div class="metric"><label>清晰度</label><b id="clarityValue">—</b><small id="clarityNote">CPP 近似值</small></div>
+      <div class="metric"><label>明亮度</label><b id="bandValue">—</b><small id="bandNote">2–4 / 0–1 kHz</small></div>
+    </section>
   </header>
 
   <main>
@@ -160,13 +179,6 @@
         <span class="grow"></span>
         <span>纵轴为线性频率</span>
       </div>
-    </section>
-
-    <section class="metrics" aria-label="实时读数">
-      <div class="metric"><label>响度</label><b id="levelValue">−∞ dBFS</b><small>相对响度，非校准声压级</small></div>
-      <div class="metric"><label>基频 / 音高</label><b id="pitchValue">—</b><small id="noteValue">未检测到稳定音高</small></div>
-      <div class="metric"><label>清晰度（CPP）</label><b id="clarityValue">—</b><small id="clarityNote">倒谱峰突出度近似值</small></div>
-      <div class="metric"><label>明亮度 2–4 / 0–1 kHz</label><b id="bandValue">—</b><small id="bandNote">高低频带能量比</small></div>
     </section>
 
     <section class="transport" aria-label="记录控制">
@@ -229,7 +241,7 @@
     </details>
 
     <div class="notice" id="secureNotice"></div>
-    <footer class="versionNote">v1.9 · 最近更新：回放增益与音名式基频读数</footer>
+    <footer class="versionNote">v2.0 · 最近更新：顶部监测指标与折叠说明</footer>
   </main>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -246,6 +258,7 @@ let waveCtx=waveLayer.getContext("2d"),specCtx=specLayer.getContext("2d",{alpha:
 let waveBackCtx=waveBackLayer.getContext("2d"),specBackCtx=specBackLayer.getContext("2d",{alpha:false});
 const ui={
   status:$("statusPill"),voiceState:$("voiceState"),time:$("timeReadout"),empty:$("emptyState"),
+  infoBtn:$("infoBtn"),infoPanel:$("infoPanel"),
   record:$("recordBtn"),play:$("playBtn"),clear:$("clearBtn"),
   level:$("levelValue"),pitch:$("pitchValue"),note:$("noteValue"),clarity:$("clarityValue"),
   clarityNote:$("clarityNote"),band:$("bandValue"),bandNote:$("bandNote"),
@@ -685,11 +698,11 @@ function updateMetrics(stats,pitch,spec){
     ui.pitch.textContent=note.name;
     ui.note.textContent=Math.round(freq)+" Hz · "+(note.cents>0?"+":"")+note.cents+" cent";
   }else{
-    pitchMidiSmooth=null;ui.pitch.textContent="—";ui.note.textContent="未检测到稳定音高";
+    pitchMidiSmooth=null;ui.pitch.textContent="—";ui.note.textContent="未检测到音高";
   }
   if(stats.levelDb<-63){
-    ui.clarity.textContent="—";ui.clarityNote.textContent="等待有效声音";
-    ui.band.textContent="—";ui.bandNote.textContent="等待有效声音";ui.voiceState.textContent="等待声音";return;
+    ui.clarity.textContent="—";ui.clarityNote.textContent="等待声音";
+    ui.band.textContent="—";ui.bandNote.textContent="等待声音";ui.voiceState.textContent="等待声音";return;
   }
   if(spec){
     const cp=Math.round(spec.clarity*100);
@@ -990,9 +1003,9 @@ async function togglePlayback(){
   try{await startPlaybackAt(playheadTime);}catch(e){showToast("无法开始回放，请再点一次。",2200);}
 }
 function resetReadouts(){
-  ui.level.textContent="−∞ dBFS";ui.pitch.textContent="—";ui.note.textContent="未检测到稳定音高";
-  ui.clarity.textContent="—";ui.clarityNote.textContent="倒谱峰突出度近似值";
-  ui.band.textContent="—";ui.bandNote.textContent="高低频带能量比";ui.voiceState.textContent="等待声音";
+  ui.level.textContent="−∞ dBFS";ui.pitch.textContent="—";ui.note.textContent="等待音高";
+  ui.clarity.textContent="—";ui.clarityNote.textContent="CPP 近似值";
+  ui.band.textContent="—";ui.bandNote.textContent="2–4 / 0–1 kHz";ui.voiceState.textContent="等待声音";
 }
 function clearAll(removeAudio=true){
   cancelReviewLineAnimation();frames=[];lastElapsed=0;playheadTime=0;reviewMode=false;reviewLineRatio=PLAYHEAD_RATIO;playbackAnchorTime=0;playbackStartLineRatio=PLAYBACK_LINE_RATIO;latestPitch=null;latestCpp=null;pitchMidiSmooth=null;smoothedLoudnessDb=-120;clearLayers();drawComposite(0);resetReadouts();
@@ -1086,6 +1099,13 @@ function updateSecurityNotice(){
 }
 
 /* ---------- events / initialisation ---------- */
+ui.infoBtn.addEventListener("click",()=>{
+  const open=ui.infoPanel.hidden;
+  ui.infoPanel.hidden=!open;ui.infoBtn.setAttribute("aria-expanded",String(open));
+});
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"&&!ui.infoPanel.hidden){ui.infoPanel.hidden=true;ui.infoBtn.setAttribute("aria-expanded","false");ui.infoBtn.focus();}
+});
 ui.record.addEventListener("click",()=>recording?stopRecording():startRecording());
 ui.play.addEventListener("click",togglePlayback);
 ui.clear.addEventListener("click",()=>{if(recording){showToast("请先停止记录。",1800);return;}clearAll(true);});
