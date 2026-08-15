@@ -76,6 +76,11 @@
   .metric b{display:block;color:#eaf2fa;font-size:14px;line-height:1.1;font-variant-numeric:tabular-nums;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .metric small{display:block;color:#657286;font-size:9px;line-height:1.2;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .metric b.brightnessMeter{display:flex;align-items:flex-end;gap:2px;height:15px;overflow:visible}
+  .signalBar{display:block;width:4px;border:1px solid #657286;border-radius:1px 1px 0 0;background:transparent}
+  .signalBar:nth-child(1){height:4px}.signalBar:nth-child(2){height:7px}.signalBar:nth-child(3){height:10px}
+  .signalBar:nth-child(4){height:13px}.signalBar:nth-child(5){height:15px}
+  .signalBar.filled{border-color:#eaf2fa;background:#eaf2fa}
 
   .transport{position:sticky;bottom:calc(6px + env(safe-area-inset-bottom));z-index:20;display:grid;
     grid-template-columns:1.55fr 1fr .72fr;gap:8px;padding:8px;border:1px solid rgba(54,66,83,.92);
@@ -151,12 +156,12 @@
       </div>
       <div id="statusPill" class="statusPill" aria-live="polite"><i></i><span>待机</span></div>
     </div>
-    <div id="infoPanel" class="infoPanel" hidden>紫色为响度包络，绿色为窄带频谱图，横向亮线为基频与谐波。建议佩戴耳机，并在安静环境中保持手机与嘴部距离一致。</div>
+    <div id="infoPanel" class="infoPanel" hidden>紫色为响度包络，绿色为窄带频谱图，横向亮线为基频与谐波。明亮度以 2–4 kHz 相对 80–1000 Hz 的能量比例粗分为 1–5 级，只适合同一设备与距离下比较。建议佩戴耳机，并在安静环境中保持手机与嘴部距离一致。</div>
     <section class="metrics" aria-label="实时监测指标">
       <div class="metric"><label>响度</label><b id="levelValue">−∞ dBFS</b><small>相对响度</small></div>
       <div class="metric"><label>基频</label><b id="pitchValue">—</b><small id="noteValue">等待音高</small></div>
       <div class="metric"><label>清晰度</label><b id="clarityValue">—</b><small id="clarityNote">CPP 近似值</small></div>
-      <div class="metric"><label>明亮度</label><b id="bandValue">—</b><small id="bandNote">2–4 / 0–1 kHz</small></div>
+      <div class="metric"><label>明亮度</label><b id="bandValue" class="brightnessMeter" role="img" aria-label="明亮度：等待声音"><i class="signalBar" aria-hidden="true"></i><i class="signalBar" aria-hidden="true"></i><i class="signalBar" aria-hidden="true"></i><i class="signalBar" aria-hidden="true"></i><i class="signalBar" aria-hidden="true"></i></b><small id="bandNote">等待声音</small></div>
     </section>
   </header>
 
@@ -241,7 +246,7 @@
     </details>
 
     <div class="notice" id="secureNotice"></div>
-    <footer class="versionNote">v2.2 · 最近更新：回放约 6 倍与弱声基频增强</footer>
+    <footer class="versionNote">v2.4 · 最近更新：明亮度改为 5 级信号格；回放增益提高至约 24 倍</footer>
   </main>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -284,7 +289,7 @@ let latestPitch=null,latestCpp=null,pitchMidiSmooth=null,lastPitchSeenAt=-Infini
 let smoothedLoudnessDb=-120;
 let inputSilenceSince=0,inputWarningShown=false;
 let cppRe=null,cppIm=null,cppWindow=null,cppN=0;
-const REWIND_SECONDS=60,PLAYHEAD_RATIO=.76,PLAYBACK_LINE_RATIO=.25,PLAYBACK_MAX_RATIO=.50,PLAYBACK_GAIN=6,ANALYSIS_INTERVAL=1/27,PITCH_INTERVAL=.085;
+const REWIND_SECONDS=60,PLAYHEAD_RATIO=.76,PLAYBACK_LINE_RATIO=.25,PLAYBACK_MAX_RATIO=.50,PLAYBACK_GAIN=24,ANALYSIS_INTERVAL=1/27,PITCH_INTERVAL=.085;
 const SETTINGS_KEY="voiceprint.display-settings.v1";
 const NOTE_NAMES=["C","C♯","D","E♭","E","F","F♯","G","A♭","A","B♭","B"];
 
@@ -701,6 +706,21 @@ function spectralMetrics(freqBytes,cppDb){
   const brightnessDb=10*Math.log10(Math.max(1e-12,brightBand)/Math.max(1e-12,lowBand));
   return {clarity,cppDb,brightnessDb};
 }
+const BRIGHTNESS_LABELS=["","偏暗","较暗","中等","较亮","明亮"];
+function brightnessLevel(db){
+  if(!Number.isFinite(db))return 0;
+  if(db<=-24)return 1;
+  if(db<=-18)return 2;
+  if(db<=-12)return 3;
+  if(db<=-6)return 4;
+  return 5;
+}
+function setBrightnessMeter(level){
+  const safe=Number.isFinite(level)?Math.max(0,Math.min(5,Math.round(level))):0;
+  ui.band.querySelectorAll(".signalBar").forEach((bar,index)=>bar.classList.toggle("filled",index<safe));
+  ui.band.setAttribute("aria-label",safe?"明亮度 "+safe+" 级，共 5 级":"明亮度：等待声音");
+  ui.bandNote.textContent=safe?safe+" / 5 · "+BRIGHTNESS_LABELS[safe]:"等待声音";
+}
 function updateMetrics(stats,pitch,spec){
   const meterDb=Number.isFinite(stats.loudnessDb)?stats.loudnessDb:stats.levelDb;
   ui.level.textContent=Number.isFinite(meterDb)&&meterDb>-119.5?meterDb.toFixed(1)+" dBFS":"−∞ dBFS";
@@ -717,14 +737,13 @@ function updateMetrics(stats,pitch,spec){
   }
   if(stats.levelDb<-63){
     ui.clarity.textContent="—";ui.clarityNote.textContent="等待声音";
-    ui.band.textContent="—";ui.bandNote.textContent="等待声音";ui.voiceState.textContent="等待声音";return;
+    setBrightnessMeter(0);ui.voiceState.textContent="等待声音";return;
   }
   if(spec){
     const cp=Math.round(spec.clarity*100);
     ui.clarity.textContent=cp+"%";
     ui.clarityNote.textContent=spec.cppDb==null?"等待有效声音":"CPP 近似 "+spec.cppDb.toFixed(1)+" dB";
-    ui.band.textContent=spec.brightnessDb.toFixed(1)+" dB";
-    ui.bandNote.textContent=spec.brightnessDb>-8?"2–4 kHz 相对集中":spec.brightnessDb>-15?"高低频比例中等":"以 0–1 kHz 为主";
+    setBrightnessMeter(brightnessLevel(spec.brightnessDb));
     /* 只有缺少音高且 CPP 很低时才判为气流/噪声；两可区域偏向“清晰”。 */
     if(voiced)ui.voiceState.textContent=cp>=60?"谐波清晰":cp>=30?"谐波较清晰":"谐波 + 噪声";
     else ui.voiceState.textContent=cp>=24?"谐波较清晰":cp>=12?"混合声 / 噪声":"气流 / 噪声为主";
@@ -1023,7 +1042,7 @@ async function togglePlayback(){
 function resetReadouts(){
   ui.level.textContent="−∞ dBFS";ui.pitch.textContent="—";ui.note.textContent="等待音高";
   ui.clarity.textContent="—";ui.clarityNote.textContent="CPP 近似值";
-  ui.band.textContent="—";ui.bandNote.textContent="2–4 / 0–1 kHz";ui.voiceState.textContent="等待声音";
+  setBrightnessMeter(0);ui.voiceState.textContent="等待声音";
 }
 function clearAll(removeAudio=true){
   cancelReviewLineAnimation();frames=[];lastElapsed=0;playheadTime=0;reviewMode=false;reviewLineRatio=PLAYHEAD_RATIO;playbackAnchorTime=0;playbackStartLineRatio=PLAYBACK_LINE_RATIO;latestPitch=null;latestCpp=null;pitchMidiSmooth=null;lastPitchSeenAt=-Infinity;smoothedLoudnessDb=-120;clearLayers();drawComposite(0);resetReadouts();
