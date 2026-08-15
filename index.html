@@ -241,7 +241,7 @@
     </details>
 
     <div class="notice" id="secureNotice"></div>
-    <footer class="versionNote">v2.0 · 最近更新：顶部监测指标与折叠说明</footer>
+    <footer class="versionNote">v2.2 · 最近更新：回放约 6 倍与弱声基频增强</footer>
   </main>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -280,11 +280,11 @@ let layerViewStart=NaN,layerWindowSec=0;
 let playheadTime=0,playbackRaf=0,lastPlaybackRender=0,scrubRenderRaf=0,pendingScrubTime=null;
 let reviewLineRaf=0,reviewLineDone=null;
 let reviewMode=false,reviewLineRatio=.76,playbackAnchorTime=0,playbackStartLineRatio=.25;
-let latestPitch=null,latestCpp=null,pitchMidiSmooth=null,lastMetricUpdate=0,toastTimer=0;
+let latestPitch=null,latestCpp=null,pitchMidiSmooth=null,lastPitchSeenAt=-Infinity,lastMetricUpdate=0,toastTimer=0;
 let smoothedLoudnessDb=-120;
 let inputSilenceSince=0,inputWarningShown=false;
 let cppRe=null,cppIm=null,cppWindow=null,cppN=0;
-const REWIND_SECONDS=60,PLAYHEAD_RATIO=.76,PLAYBACK_LINE_RATIO=.25,PLAYBACK_MAX_RATIO=.50,PLAYBACK_GAIN=3,ANALYSIS_INTERVAL=1/27,PITCH_INTERVAL=.085;
+const REWIND_SECONDS=60,PLAYHEAD_RATIO=.76,PLAYBACK_LINE_RATIO=.25,PLAYBACK_MAX_RATIO=.50,PLAYBACK_GAIN=6,ANALYSIS_INTERVAL=1/27,PITCH_INTERVAL=.085;
 const SETTINGS_KEY="voiceprint.display-settings.v1";
 const NOTE_NAMES=["C","C♯","D","E♭","E","F","F♯","G","A♭","A","B♭","B"];
 
@@ -585,14 +585,15 @@ function computeTimeStats(buf){
   const rms=Math.sqrt(sum/buf.length),levelDb=rms>1e-7?20*Math.log10(rms):-120;
   return {rms,min,max,levelDb};
 }
-function detectPitch(buf,sampleRate){
+function detectPitch(buf,sampleRate,hintHz=null){
   const step=2,N=Math.floor(buf.length/step),sr=sampleRate/step;
   if(N<900)return null;
   const x=new Float32Array(N);let mean=0,rms=0;
   for(let i=0;i<N;i++){x[i]=(buf[i*2]+buf[Math.min(buf.length-1,i*2+1)])*.5;mean+=x[i];}
   mean/=N;
   for(let i=0;i<N;i++){x[i]-=mean;rms+=x[i]*x[i];}
-  rms=Math.sqrt(rms/N);if(rms<.0045)return null;
+  /* 原门限约 −47 dBFS，容易漏掉普通距离下的轻声；降到约 −59 dBFS。 */
+  rms=Math.sqrt(rms/N);if(rms<.0011)return null;
   const minLag=Math.max(2,Math.floor(sr/1100)),maxLag=Math.min(N-3,Math.ceil(sr/65));
   const corr=new Float32Array(maxLag+2);let global=-1,globalLag=-1;
   for(let lag=minLag;lag<=maxLag;lag++){
@@ -601,13 +602,27 @@ function detectPitch(buf,sampleRate){
     const c=xy/Math.sqrt(xx*yy+1e-12);corr[lag]=c;
     if(c>global){global=c;globalLag=lag;}
   }
-  if(global<.50)return null;
+  /* 气声与弱声的周期峰较低；0.34 仍能排除通常低相关的底噪。 */
+  if(global<.34)return null;
   let lag=globalLag;
-  for(let i=minLag+1;i<globalLag;i++){
-    if(corr[i]>corr[i-1]&&corr[i]>=corr[i+1]&&corr[i]>.58&&corr[i]>global*.91){lag=i;break;}
+  const candidates=[];
+  for(let i=minLag+1;i<maxLag;i++){
+    if(corr[i]>corr[i-1]&&corr[i]>=corr[i+1]&&corr[i]>=Math.max(.32,global*.72))candidates.push(i);
+  }
+  if(hintHz&&Number.isFinite(hintHz)&&candidates.length){
+    let bestScore=-Infinity;
+    for(const candidate of candidates){
+      const f=sr/candidate,continuity=Math.min(2,Math.abs(Math.log2(f/hintHz)));
+      const score=corr[candidate]-.09*continuity;
+      if(score>bestScore){bestScore=score;lag=candidate;}
+    }
+  }else{
+    const early=candidates.find(candidate=>corr[candidate]>=Math.max(.35,global*.78));
+    if(early)lag=early;
   }
   const a=corr[lag-1]||0,b=corr[lag],c=corr[lag+1]||0,den=a-2*b+c;
-  const refined=lag+(Math.abs(den)>1e-6?.5*(a-c)/den:0);
+  const correction=Math.abs(den)>1e-6?Math.max(-.5,Math.min(.5,.5*(a-c)/den)):0;
+  const refined=lag+correction;
   const f=sr/refined;if(f<65||f>1100)return null;
   return {f,confidence:Math.max(0,Math.min(1,b))};
 }
@@ -736,7 +751,10 @@ function analysisLoop(nowMs){
     const stats=computeTimeStats(timeData);
     stats.loudnessDb=smoothLoudness(stats.levelDb);
     if(now-lastPitchAt>=PITCH_INTERVAL){
-      lastPitchAt=now;latestPitch=detectPitch(timeData,audioCtx.sampleRate);
+      lastPitchAt=now;
+      const detected=detectPitch(timeData,audioCtx.sampleRate,latestPitch&&latestPitch.f);
+      if(detected){latestPitch=detected;lastPitchSeenAt=now;}
+      else if(stats.levelDb<-68||now-lastPitchSeenAt>.34)latestPitch=null;
       if(stats.levelDb>-63){
         const cpp=computeCpp(timeData,audioCtx.sampleRate);
         if(cpp!=null)latestCpp=latestCpp==null?cpp:latestCpp*.72+cpp*.28;
@@ -890,7 +908,7 @@ async function startRecording(){
     recording=true;recordStartWall=performance.now()/1000;lastElapsed=0;lastAnalysisAt=0;lastPitchAt=0;lastMetricUpdate=0;
     inputSilenceSince=0;inputWarningShown=false;smoothedLoudnessDb=-120;
     playheadTime=0;reviewMode=false;reviewLineRatio=PLAYHEAD_RATIO;
-    latestPitch=null;latestCpp=null;pitchMidiSmooth=null;ui.record.classList.add("recording");
+    latestPitch=null;latestCpp=null;pitchMidiSmooth=null;lastPitchSeenAt=-Infinity;ui.record.classList.add("recording");
     ui.record.querySelector(".btnIcon").textContent="■";ui.record.querySelector(".btnText").textContent="停止记录";
     ui.play.disabled=true;setStatus("记录中","live");ui.voiceState.textContent="已连接 "+micName()+" · 等待声音";ui.empty.style.display="none";
     if(!canReplay)showToast("图谱可持续记录，但此浏览器不支持 1 分钟声音回放缓存。",3000);
@@ -1008,7 +1026,7 @@ function resetReadouts(){
   ui.band.textContent="—";ui.bandNote.textContent="2–4 / 0–1 kHz";ui.voiceState.textContent="等待声音";
 }
 function clearAll(removeAudio=true){
-  cancelReviewLineAnimation();frames=[];lastElapsed=0;playheadTime=0;reviewMode=false;reviewLineRatio=PLAYHEAD_RATIO;playbackAnchorTime=0;playbackStartLineRatio=PLAYBACK_LINE_RATIO;latestPitch=null;latestCpp=null;pitchMidiSmooth=null;smoothedLoudnessDb=-120;clearLayers();drawComposite(0);resetReadouts();
+  cancelReviewLineAnimation();frames=[];lastElapsed=0;playheadTime=0;reviewMode=false;reviewLineRatio=PLAYHEAD_RATIO;playbackAnchorTime=0;playbackStartLineRatio=PLAYBACK_LINE_RATIO;latestPitch=null;latestCpp=null;pitchMidiSmooth=null;lastPitchSeenAt=-Infinity;smoothedLoudnessDb=-120;clearLayers();drawComposite(0);resetReadouts();
   ui.time.textContent="00:00.0";ui.empty.style.display="";
   if(removeAudio){stopPlayback(false);closePcmCapture();pcmRing=null;pcmCount=0;pcmWrite=0;
     playbackBuffer=null;playbackOffset=0;playbackTimelineStart=0;
