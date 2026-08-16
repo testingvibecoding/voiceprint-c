@@ -180,7 +180,7 @@
         <span><i class="swatch energy"></i>下方：绿色频谱图，暗 → 亮表示能量增强</span>
         <span><i class="swatch"></i>横向亮线：基频与谐波</span>
         <span class="grow"></span>
-        <span>滚动保留最近 1 分钟 · 停止后左右拖动回看</span>
+        <span>滚动保留最近 6 分钟 · 停止后左右拖动回看</span>
         <span class="grow"></span>
         <span>纵轴为线性频率</span>
       </div>
@@ -227,7 +227,7 @@
           <div class="rangeRow"><input id="loudnessGateRange" type="range" min="-80" max="-25" value="-55" step="1"><output id="loudnessGateOut">−55 dBFS</output></div>
         </div>
         <label class="checkRow"><input id="boostCheck" type="checkbox" checked><span>开启高频补偿，使 2–5 kHz 的泛音与共振带更易观察（只改变显示，不改变录音）</span></label>
-        <p class="finePrint">显示参数会自动记住，下次打开继续使用。响度使用去直流 RMS、底噪门限和攻放平滑，再做软压缩显示；只改变画面，不改变录音，也不等同于校准声压级。参数改变时只重绘当前缓存。</p>
+        <p class="finePrint">显示参数会自动记住，下次打开继续使用。频谱采用 8192 点窄带分析并提高时间采样密度；响度使用去直流 RMS、底噪门限和攻放平滑，再做软压缩显示。显示处理不改变录音，也不等同于校准声压级；参数改变时只重绘当前缓存。</p>
       </div>
     </details>
 
@@ -246,7 +246,7 @@
     </details>
 
     <div class="notice" id="secureNotice"></div>
-    <footer class="versionNote">v2.4 · 最近更新：明亮度改为 5 级信号格；回放增益提高至约 24 倍</footer>
+    <footer class="versionNote">v2.5 · 最近更新：提高频谱精细度；滚动保留 6 分钟；拖动即显四项数值</footer>
   </main>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -275,9 +275,9 @@ const ui={
 
 let cssW=0,cssH=0,DPR=1,layout=null;
 let windowSec=8,maxFreq=5000,floorDb=-100,loudnessGainDb=3,loudnessGateDb=-55,highBoost=true;
-let audioCtx=null,analyser=null,analysisSink=null,micStream=null,micTrack=null,sourceNode=null,timeData=null,freqData=null;
+let audioCtx=null,analyser=null,analysisSink=null,micStream=null,micTrack=null,sourceNode=null,timeData=null,voiceData=null,freqData=null;
 let recording=false,recordStartWall=0,lastElapsed=0,lastAnalysisAt=0,lastPitchAt=0;
-let pcmProcessor=null,pcmRing=null,pcmWrite=0,pcmCount=0,wakeLock=null;
+let pcmProcessor=null,pcmRing=null,pcmWrite=0,pcmCount=0,pcmCaptureRate=0,pcmResamplePos=0,wakeLock=null;
 let playbackBuffer=null,playbackSource=null,playbackGainNode=null,playbackLimiterNode=null,playbackPlaying=false,playbackOffset=0;
 let playbackStartCtxTime=0,playbackTimelineStart=0,playbackToken=0;
 let frames=[],binHz=0,storeBins=0,lastPaintX=-1,scrollRemainder=0,rafId=0;
@@ -289,7 +289,8 @@ let latestPitch=null,latestCpp=null,pitchMidiSmooth=null,lastPitchSeenAt=-Infini
 let smoothedLoudnessDb=-120;
 let inputSilenceSince=0,inputWarningShown=false;
 let cppRe=null,cppIm=null,cppWindow=null,cppN=0;
-const REWIND_SECONDS=60,PLAYHEAD_RATIO=.76,PLAYBACK_LINE_RATIO=.25,PLAYBACK_MAX_RATIO=.50,PLAYBACK_GAIN=24,ANALYSIS_INTERVAL=1/27,PITCH_INTERVAL=.085;
+const REWIND_SECONDS=360,FFT_SIZE=8192,VOICE_ANALYSIS_SIZE=4096,PCM_TARGET_RATE=24000;
+const PLAYHEAD_RATIO=.76,PLAYBACK_LINE_RATIO=.25,PLAYBACK_MAX_RATIO=.50,PLAYBACK_GAIN=24,ANALYSIS_INTERVAL=1/36,PITCH_INTERVAL=.085;
 const SETTINGS_KEY="voiceprint.display-settings.v1";
 const NOTE_NAMES=["C","C♯","D","E♭","E","F","F♯","G","A♭","A","B♭","B"];
 
@@ -307,10 +308,11 @@ function resizeCanvas(){
   const r=shell.getBoundingClientRect();
   const nextW=Math.max(260,Math.round(r.width)),nextH=Math.max(330,Math.round(r.height));
   if(nextW===cssW&&nextH===cssH)return;
-  cssW=nextW;cssH=nextH;DPR=Math.min(window.devicePixelRatio||1,2);
+  cssW=nextW;cssH=nextH;DPR=Math.min(window.devicePixelRatio||1,3);
   scope.width=Math.round(cssW*DPR);scope.height=Math.round(cssH*DPR);
   scope.style.width=cssW+"px";scope.style.height=cssH+"px";
   ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.imageSmoothingEnabled=false;
   layout=computeLayout();
   waveLayer.width=layout.plotW;waveLayer.height=layout.waveH;
   waveBackLayer.width=layout.plotW;waveBackLayer.height=layout.waveH;
@@ -323,7 +325,7 @@ function resizeCanvas(){
 }
 
 /* ---------- colour / spectral painting ---------- */
-const COLOR_LEVELS=240;
+const COLOR_LEVELS=384;
 const COLOR_STOPS=[
   [0,[0,0,0]],[.10,[1,17,10]],[.28,[4,63,35]],[.52,[7,143,76]],
   [.73,[20,214,117]],[.88,[99,250,161]],[1,[235,255,241]]
@@ -425,7 +427,7 @@ function moveLayers(px){
   swapLayerBuffers();
 }
 function shiftLayers(px){moveLayers(-Math.max(1,Math.min(layout.plotW,px)));}
-function earliestFrameTime(){return frames.length?frames[0].t:0;}
+function earliestFrameTime(){return frames.length?Math.max(frames[0].t,Math.max(0,lastElapsed-REWIND_SECONDS)):0;}
 function reviewEarliestTime(){return playbackBuffer?Math.max(earliestFrameTime(),playbackTimelineStart):earliestFrameTime();}
 function activeLineRatio(atTime=playheadTime){
   if(recording)return PLAYHEAD_RATIO;
@@ -757,7 +759,11 @@ function captureFrame(elapsed,stats,pitch,spec){
   const previousT=frames.length?frames[frames.length-1].t:0;
   frames.push(frame);
   const cutoff=elapsed-REWIND_SECONDS;
-  while(frames.length&&frames[0].t<cutoff)frames.shift();
+  /* 六分钟后按约一秒一批清理，避免逐帧 shift 长数组造成画面卡顿。 */
+  if(frames.length&&frames[0].t<cutoff-1){
+    const trim=lowerBoundFrame(cutoff);
+    if(trim>0)frames.splice(0,trim);
+  }
   appendFrameToLayers(frame,previousT);
 }
 function analysisLoop(nowMs){
@@ -767,15 +773,15 @@ function analysisLoop(nowMs){
   if(now-lastAnalysisAt>=ANALYSIS_INTERVAL&&analyser){
     lastAnalysisAt=now;
     analyser.getFloatTimeDomainData(timeData);analyser.getByteFrequencyData(freqData);
-    const stats=computeTimeStats(timeData);
+    const stats=computeTimeStats(voiceData);
     stats.loudnessDb=smoothLoudness(stats.levelDb);
     if(now-lastPitchAt>=PITCH_INTERVAL){
       lastPitchAt=now;
-      const detected=detectPitch(timeData,audioCtx.sampleRate,latestPitch&&latestPitch.f);
+      const detected=detectPitch(voiceData,audioCtx.sampleRate,latestPitch&&latestPitch.f);
       if(detected){latestPitch=detected;lastPitchSeenAt=now;}
       else if(stats.levelDb<-68||now-lastPitchSeenAt>.34)latestPitch=null;
       if(stats.levelDb>-63){
-        const cpp=computeCpp(timeData,audioCtx.sampleRate);
+        const cpp=computeCpp(voiceData,audioCtx.sampleRate);
         if(cpp!=null)latestCpp=latestCpp==null?cpp:latestCpp*.72+cpp*.28;
       }else latestCpp=null;
     }
@@ -856,17 +862,25 @@ function updateInputHealth(stats,now){
   }
 }
 function setupPcmCapture(){
-  pcmRing=new Float32Array(Math.ceil(audioCtx.sampleRate*REWIND_SECONDS));pcmWrite=0;pcmCount=0;
-  if(!audioCtx.createScriptProcessor){pcmRing=null;return false;}
+  /* 24 kHz / 16-bit 环形缓存足以覆盖 8 kHz 声纹与清晰人声回放，
+     六分钟仅约 16.5 MiB，避免 iPhone 因 48 kHz Float32 缓存占用过高。 */
+  pcmCaptureRate=Math.min(PCM_TARGET_RATE,audioCtx.sampleRate);
+  pcmRing=new Int16Array(Math.ceil(pcmCaptureRate*REWIND_SECONDS));pcmWrite=0;pcmCount=0;pcmResamplePos=0;
+  if(!audioCtx.createScriptProcessor){pcmRing=null;pcmCaptureRate=0;return false;}
   pcmProcessor=audioCtx.createScriptProcessor(2048,1,1);
   pcmProcessor.onaudioprocess=e=>{
     const output=e.outputBuffer.getChannelData(0);output.fill(0);
     if(!recording||!pcmRing)return;
-    const input=e.inputBuffer.getChannelData(0),cap=pcmRing.length;
-    const first=Math.min(input.length,cap-pcmWrite);
-    pcmRing.set(input.subarray(0,first),pcmWrite);
-    if(first<input.length)pcmRing.set(input.subarray(first),0);
-    pcmWrite=(pcmWrite+input.length)%cap;pcmCount=Math.min(cap,pcmCount+input.length);
+    const input=e.inputBuffer.getChannelData(0),cap=pcmRing.length,ratio=audioCtx.sampleRate/pcmCaptureRate;
+    let pos=pcmResamplePos;
+    while(pos<input.length){
+      const i=Math.floor(pos),q=pos-i;
+      let sample=input[i]*(1-q)+input[Math.min(input.length-1,i+1)]*q;
+      sample=Math.max(-1,Math.min(1,sample));
+      pcmRing[pcmWrite]=sample<0?Math.round(sample*32768):Math.round(sample*32767);
+      pcmWrite=(pcmWrite+1)%cap;pcmCount=Math.min(cap,pcmCount+1);pos+=ratio;
+    }
+    pcmResamplePos=pos-input.length;
   };
   sourceNode.connect(pcmProcessor);pcmProcessor.connect(audioCtx.destination);
   return true;
@@ -876,19 +890,20 @@ function closePcmCapture(){
 }
 function finalizePcmPlayback(){
   playbackBuffer=null;playbackOffset=0;
-  if(!pcmRing||pcmCount<Math.floor(audioCtx.sampleRate*.12)){pcmRing=null;pcmCount=0;ui.play.disabled=true;return;}
+  if(!pcmRing||pcmCount<Math.floor(pcmCaptureRate*.12)){pcmRing=null;pcmCount=0;pcmCaptureRate=0;pcmResamplePos=0;ui.play.disabled=true;return;}
   const count=pcmCount,cap=pcmRing.length,start=(pcmWrite-count+cap)%cap;
-  const buffer=audioCtx.createBuffer(1,count,audioCtx.sampleRate),out=buffer.getChannelData(0);
-  const first=Math.min(count,cap-start);out.set(pcmRing.subarray(start,start+first),0);
-  if(first<count)out.set(pcmRing.subarray(0,count-first),first);
+  const buffer=audioCtx.createBuffer(1,count,pcmCaptureRate),out=buffer.getChannelData(0);
+  const first=Math.min(count,cap-start);
+  for(let i=0;i<first;i++)out[i]=pcmRing[start+i]/32768;
+  for(let i=first;i<count;i++)out[i]=pcmRing[i-first]/32768;
   playbackBuffer=buffer;playbackTimelineStart=Math.max(0,lastElapsed-buffer.duration);
-  while(frames.length&&frames[0].t<playbackTimelineStart)frames.shift();
-  playbackOffset=buffer.duration;pcmRing=null;pcmCount=0;pcmWrite=0;ui.play.disabled=false;
+  const trim=lowerBoundFrame(playbackTimelineStart);if(trim>0)frames.splice(0,trim);
+  playbackOffset=buffer.duration;pcmRing=null;pcmCount=0;pcmWrite=0;pcmCaptureRate=0;pcmResamplePos=0;ui.play.disabled=false;
 }
 function setStatus(text,kind=""){
   ui.status.className="statusPill"+(kind?" "+kind:"");ui.status.querySelector("span").textContent=text;
 }
-function setRecordedStatus(){setStatus(lastElapsed>REWIND_SECONDS?"最近 1 分钟":"已录制","done");}
+function setRecordedStatus(){setStatus(lastElapsed>REWIND_SECONDS?"最近 6 分钟":"已录制","done");}
 function friendlyMicError(err){
   if(location.protocol==="file:"||!window.isSecureContext)return "实时麦克风需要 HTTPS。直接从本地文件打开时，浏览器可能拒绝麦克风。";
   if(err&&err.name==="NotAllowedError")return "麦克风未获允许。请在浏览器地址栏的网站权限中允许麦克风，并检查系统麦克风权限。";
@@ -912,14 +927,16 @@ async function startRecording(){
     connectMicDiagnostics();
     sourceNode=audioCtx.createMediaStreamSource(stream);
     analyser=audioCtx.createAnalyser();
-    /* 44.1/48 kHz 下约 85–93 ms、10.8–11.7 Hz/bin：以频率分辨率优先的窄带声谱。 */
-    analyser.fftSize=4096;analyser.smoothingTimeConstant=.10;
+    /* 44.1/48 kHz 下约 171–186 ms、5.4–5.9 Hz/bin：更精细的窄带声谱。 */
+    analyser.fftSize=FFT_SIZE;analyser.smoothingTimeConstant=.05;
     analyser.minDecibels=-120;analyser.maxDecibels=0;
     sourceNode.connect(analyser);
     /* 显式接入零增益输出，确保桌面浏览器持续执行分析支路，同时绝不监听麦克风。 */
     analysisSink=audioCtx.createGain();analysisSink.gain.value=0;
     analyser.connect(analysisSink);analysisSink.connect(audioCtx.destination);
-    timeData=new Float32Array(analyser.fftSize);freqData=new Uint8Array(analyser.frequencyBinCount);
+    timeData=new Float32Array(analyser.fftSize);
+    voiceData=timeData.subarray(Math.max(0,timeData.length-VOICE_ANALYSIS_SIZE));
+    freqData=new Uint8Array(analyser.frequencyBinCount);
     binHz=audioCtx.sampleRate/analyser.fftSize;storeBins=Math.min(freqData.length,Math.ceil(8000/binHz)+3);
     const canReplay=setupPcmCapture();
     /* 权限弹窗可能再次挂起 AudioContext；图建立后必须重新确认。 */
@@ -930,11 +947,11 @@ async function startRecording(){
     latestPitch=null;latestCpp=null;pitchMidiSmooth=null;lastPitchSeenAt=-Infinity;ui.record.classList.add("recording");
     ui.record.querySelector(".btnIcon").textContent="■";ui.record.querySelector(".btnText").textContent="停止记录";
     ui.play.disabled=true;setStatus("记录中","live");ui.voiceState.textContent="已连接 "+micName()+" · 等待声音";ui.empty.style.display="none";
-    if(!canReplay)showToast("图谱可持续记录，但此浏览器不支持 1 分钟声音回放缓存。",3000);
+    if(!canReplay)showToast("图谱可持续记录，但此浏览器不支持 6 分钟声音回放缓存。",3000);
     try{if(navigator.wakeLock)wakeLock=await navigator.wakeLock.request("screen");}catch(e){}
     rafId=requestAnimationFrame(analysisLoop);
   }catch(err){
-    closePcmCapture();pcmRing=null;
+    closePcmCapture();pcmRing=null;pcmCount=0;pcmWrite=0;pcmCaptureRate=0;pcmResamplePos=0;
     try{if(sourceNode)sourceNode.disconnect();if(analyser)analyser.disconnect();if(analysisSink)analysisSink.disconnect();}catch(e){}
     sourceNode=null;analyser=null;analysisSink=null;micTrack=null;
     if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null;}
@@ -947,7 +964,7 @@ function stopRecording(message="记录完成"){
   closePcmCapture();finalizePcmPlayback();
   if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null;}
   try{if(sourceNode)sourceNode.disconnect();if(analyser)analyser.disconnect();if(analysisSink)analysisSink.disconnect();}catch(e){}
-  sourceNode=null;analyser=null;analysisSink=null;micTrack=null;timeData=null;freqData=null;
+  sourceNode=null;analyser=null;analysisSink=null;micTrack=null;timeData=null;voiceData=null;freqData=null;
   playheadTime=lastElapsed;
   ui.record.classList.remove("recording");ui.record.querySelector(".btnIcon").textContent="●";
   ui.record.querySelector(".btnText").textContent="重新记录";setRecordedStatus();
@@ -990,8 +1007,11 @@ function renderAtTime(time,resetPitch=false){
   if(playbackBuffer&&!playbackPlaying){
     playbackOffset=Math.max(0,Math.min(playbackBuffer.duration,playheadTime-playbackTimelineStart));
   }
-  updateLayersForTime(playheadTime);drawComposite(playheadTime);ui.time.textContent=formatClock(playheadTime,true);
-  const frame=frameNear(playheadTime);
+  updateLayersForTime(playheadTime);drawComposite(playheadTime);updateReadoutsAtTime(playheadTime,resetPitch);
+}
+function updateReadoutsAtTime(time,resetPitch=false){
+  ui.time.textContent=formatClock(time,true);
+  const frame=frameNear(time);
   if(frame){if(resetPitch)pitchMidiSmooth=null;updateMetrics(frame,frame.pitch,frame.spec);}
 }
 function playbackVisualLoop(ts){
@@ -1047,7 +1067,7 @@ function resetReadouts(){
 function clearAll(removeAudio=true){
   cancelReviewLineAnimation();frames=[];lastElapsed=0;playheadTime=0;reviewMode=false;reviewLineRatio=PLAYHEAD_RATIO;playbackAnchorTime=0;playbackStartLineRatio=PLAYBACK_LINE_RATIO;latestPitch=null;latestCpp=null;pitchMidiSmooth=null;lastPitchSeenAt=-Infinity;smoothedLoudnessDb=-120;clearLayers();drawComposite(0);resetReadouts();
   ui.time.textContent="00:00.0";ui.empty.style.display="";
-  if(removeAudio){stopPlayback(false);closePcmCapture();pcmRing=null;pcmCount=0;pcmWrite=0;
+  if(removeAudio){stopPlayback(false);closePcmCapture();pcmRing=null;pcmCount=0;pcmWrite=0;pcmCaptureRate=0;pcmResamplePos=0;
     playbackBuffer=null;playbackOffset=0;playbackTimelineStart=0;
     ui.play.disabled=true;ui.record.querySelector(".btnText").textContent="开始记录";setStatus("待机");}
 }
@@ -1115,6 +1135,8 @@ function animateReviewLineTo(target,duration=220,done=null){
 function requestScrubRender(time){
   const lo=reviewEarliestTime(),hi=playbackBuffer?playbackEndTime():lastElapsed;
   pendingScrubTime=Math.max(lo,Math.min(hi,time));playheadTime=pendingScrubTime;
+  /* 指标直接跟随手指位置；画布重绘仍合并到下一帧以保持拖动顺滑。 */
+  updateReadoutsAtTime(playheadTime,true);
   if(scrubRenderRaf)return;
   scrubRenderRaf=requestAnimationFrame(()=>{
     scrubRenderRaf=0;
@@ -1182,7 +1204,7 @@ ui.boost.addEventListener("change",()=>{highBoost=ui.boost.checked;saveSettings(
     scrubbing=false;shell.classList.remove("scrubbing");flushScrubRender();renderAtTime(playheadTime,true);
     if(playbackBuffer)playbackOffset=Math.max(0,Math.min(playbackBuffer.duration,playheadTime-playbackTimelineStart));
     ui.voiceState.textContent="已定位到 "+formatClock(playheadTime,true)+(playbackBuffer?"":" · 仅可回看图谱");
-    if(hitEarliest)showToast("已到最早可回放位置（最近 1 分钟）",1800);
+    if(hitEarliest)showToast("已到最早可回放位置（最近 6 分钟）",1800);
     if(wasPlaying&&playbackBuffer){
       const resume=()=>startPlaybackAt(playheadTime).catch(()=>showToast("无法继续回放。"));
       const duration=Math.max(70,220*Math.abs(reviewLineRatio-PLAYBACK_LINE_RATIO)/(PLAYHEAD_RATIO-PLAYBACK_LINE_RATIO));
