@@ -105,7 +105,7 @@
   select{width:100%;height:42px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);
     color:var(--text);padding:0 9px;-webkit-appearance:none;appearance:none;font-size:13px}
   .rangeRow{display:flex;align-items:center;gap:8px}
-  input[type=range]{width:100%;accent-color:var(--blue)}
+  input[type=range]{width:100%;accent-color:var(--blue);touch-action:manipulation}
   output{min-width:46px;text-align:right;color:#dce6ef;font-size:11px;font-variant-numeric:tabular-nums}
   .checkRow{display:flex;align-items:flex-start;gap:9px;color:#cbd6e1;font-size:12px;line-height:1.4;margin-top:12px}
   .checkRow input{width:18px;height:18px;accent-color:var(--blue);flex:0 0 auto}
@@ -215,8 +215,8 @@
           </div>
         </div>
         <div class="setting" style="margin-top:12px">
-          <label for="floorRange">显示灵敏度（越低越容易看见微弱气声）</label>
-          <div class="rangeRow"><input id="floorRange" type="range" min="-112" max="-88" value="-100" step="1"><output id="floorOut">−100 dB</output></div>
+          <label for="floorRange">显示灵敏度（范围 −120～−40 dB；越低越容易看见微弱气声）</label>
+          <div class="rangeRow"><input id="floorRange" type="range" min="-120" max="-40" value="-88" step="1"><output id="floorOut">−88 dB</output></div>
         </div>
         <div class="setting" style="margin-top:12px">
           <label for="waveGainRange">响度显示增益（只改变上方紫色包络）</label>
@@ -227,7 +227,7 @@
           <div class="rangeRow"><input id="loudnessGateRange" type="range" min="-80" max="-25" value="-55" step="1"><output id="loudnessGateOut">−55 dBFS</output></div>
         </div>
         <label class="checkRow"><input id="boostCheck" type="checkbox" checked><span>开启高频补偿，使 2–5 kHz 的泛音与共振带更易观察（只改变显示，不改变录音）</span></label>
-        <p class="finePrint">显示参数会自动记住，下次打开继续使用。频谱采用 8192 点窄带分析并提高时间采样密度；响度使用去直流 RMS、底噪门限和攻放平滑，再做软压缩显示。显示处理不改变录音，也不等同于校准声压级；参数改变时只重绘当前缓存。</p>
+        <p class="finePrint">显示参数会自动记住，下次打开继续使用；双击或双点任一滑轨可恢复该项默认值。频谱采用 8192 点窄带分析并提高时间采样密度；响度使用去直流 RMS、底噪门限和攻放平滑，再做软压缩显示。显示处理不改变录音，也不等同于校准声压级；参数改变时只重绘当前缓存。</p>
       </div>
     </details>
 
@@ -246,7 +246,7 @@
     </details>
 
     <div class="notice" id="secureNotice"></div>
-    <footer class="versionNote">v2.5 · 最近更新：提高频谱精细度；滚动保留 6 分钟；拖动即显四项数值</footer>
+    <footer class="versionNote">v2.7 · 最近更新：修正灵敏度实际范围为 −120～−40 dB；默认 −88 dB</footer>
   </main>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -274,7 +274,9 @@ const ui={
 };
 
 let cssW=0,cssH=0,DPR=1,layout=null;
-let windowSec=8,maxFreq=5000,floorDb=-100,loudnessGainDb=3,loudnessGateDb=-55,highBoost=true;
+const FLOOR_MIN_DB=-120,FLOOR_MAX_DB=-40,DEFAULT_FLOOR_DB=-88;
+const DEFAULT_LOUDNESS_GAIN_DB=3,DEFAULT_LOUDNESS_GATE_DB=-55;
+let windowSec=8,maxFreq=5000,floorDb=DEFAULT_FLOOR_DB,loudnessGainDb=DEFAULT_LOUDNESS_GAIN_DB,loudnessGateDb=DEFAULT_LOUDNESS_GATE_DB,highBoost=true;
 let audioCtx=null,analyser=null,analysisSink=null,micStream=null,micTrack=null,sourceNode=null,timeData=null,voiceData=null,freqData=null;
 let recording=false,recordStartWall=0,lastElapsed=0,lastAnalysisAt=0,lastPitchAt=0;
 let pcmProcessor=null,pcmRing=null,pcmWrite=0,pcmCount=0,pcmCaptureRate=0,pcmResamplePos=0,wakeLock=null;
@@ -1076,6 +1078,8 @@ function clearAll(removeAudio=true){
 function signedDb(value){return (value>0?"+":"")+value+" dB";}
 function gateDbLabel(value){return (value<0?"−":"")+Math.abs(value)+" dBFS";}
 function restoreSettings(){
+  /* 同时写入 DOM 属性，避免旧页面恢复状态保留先前的 −112～−88 dB 边界。 */
+  ui.floor.min=String(FLOOR_MIN_DB);ui.floor.max=String(FLOOR_MAX_DB);ui.floor.step="1";
   let saved={};
   try{saved=JSON.parse(localStorage.getItem(SETTINGS_KEY)||"{}");}catch(_){saved={};}
   if(!saved||typeof saved!=="object")saved={};
@@ -1083,7 +1087,7 @@ function restoreSettings(){
   const savedFloor=Number(saved.floorDb),savedGain=Number(saved.loudnessGainDb),savedGate=Number(saved.loudnessGateDb);
   if([6,8,12].includes(savedWindow))windowSec=savedWindow;
   if([4000,5000,6000,8000].includes(savedFreq))maxFreq=savedFreq;
-  if(Number.isFinite(savedFloor))floorDb=Math.max(-112,Math.min(-88,Math.round(savedFloor)));
+  if(Number.isFinite(savedFloor))floorDb=Math.max(FLOOR_MIN_DB,Math.min(FLOOR_MAX_DB,Math.round(savedFloor)));
   if(Number.isFinite(savedGain))loudnessGainDb=Math.max(-6,Math.min(18,Math.round(savedGain)));
   if(Number.isFinite(savedGate))loudnessGateDb=Math.max(-80,Math.min(-25,Math.round(savedGate)));
   if(typeof saved.highBoost==="boolean")highBoost=saved.highBoost;
@@ -1173,6 +1177,24 @@ ui.freq.addEventListener("change",()=>{maxFreq=Number(ui.freq.value);saveSetting
 ui.floor.addEventListener("input",()=>{floorDb=Number(ui.floor.value);ui.floorOut.value=(floorDb<0?"−":"")+Math.abs(floorDb)+" dB";saveSettings();scheduleRebuild();});
 ui.waveGain.addEventListener("input",()=>{loudnessGainDb=Number(ui.waveGain.value);ui.waveGainOut.value=signedDb(loudnessGainDb);saveSettings();scheduleRebuild();});
 ui.loudnessGate.addEventListener("input",()=>{loudnessGateDb=Number(ui.loudnessGate.value);ui.loudnessGateOut.value=gateDbLabel(loudnessGateDb);saveSettings();scheduleRebuild();});
+function bindRangeDefault(input,defaultValue,label){
+  let lastTapAt=0;
+  const reset=()=>{
+    input.value=String(defaultValue);
+    input.dispatchEvent(new Event("input",{bubbles:true}));
+    showToast(label+"已恢复默认值");
+  };
+  input.addEventListener("dblclick",e=>{e.preventDefault();reset();});
+  input.addEventListener("pointerup",e=>{
+    if(e.pointerType==="mouse")return;
+    const now=performance.now();
+    if(now-lastTapAt<=360){e.preventDefault();lastTapAt=0;reset();}
+    else lastTapAt=now;
+  });
+}
+bindRangeDefault(ui.floor,DEFAULT_FLOOR_DB,"显示灵敏度");
+bindRangeDefault(ui.waveGain,DEFAULT_LOUDNESS_GAIN_DB,"响度显示增益");
+bindRangeDefault(ui.loudnessGate,DEFAULT_LOUDNESS_GATE_DB,"响度底噪门限");
 ui.boost.addEventListener("change",()=>{highBoost=ui.boost.checked;saveSettings();scheduleRebuild();});
 (function enableTimelineScrub(){
   let down=false,scrubbing=false,startX=0,startY=0,startTime=0,wasPlaying=false,hitEarliest=false;
